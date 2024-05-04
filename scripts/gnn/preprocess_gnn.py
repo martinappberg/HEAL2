@@ -23,9 +23,9 @@ def main():
     os.makedirs(f'{output}/af_{af}/feats', exist_ok=True)
 
     ggi = pd.read_csv(args.ggi, sep='\t', header=None)
-    mutational_burden = pd.read_csv(args.input, sep='\t', index_col=0)
+    mutational_burden = pd.read_csv(args.input, sep='\t', index_col=[0, 1])
 
-    gene_list = mutational_burden.columns[:-1].tolist()
+    gene_list = mutational_burden.index.get_level_values(level=1).unique().tolist()
 
     # Remove rows in the ggi dataframe that are not in the gene_list
     print(ggi.shape)
