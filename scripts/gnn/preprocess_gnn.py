@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Additionally Preprocess data for GNN')
     parser.add_argument('--af', type=float, default=0.05, help='Allele frequency threshold')
     parser.add_argument('-o', '--output', type=str, default=os.path.join(os.path.dirname(__file__), '../../gnn_data'), help='Output directory')
-    parser.add_argument('--ggi', type=str, default=os.path.join(os.path.dirname(__file__), '../files/ggi_no_score.csv'), help='Gene-gene interaction file')
+    parser.add_argument('--ggi', type=str, default=os.path.join(os.path.dirname(__file__), '../../files/ggi_no_score.csv'), help='Gene-gene interaction file')
     parser.add_argument('-i', '--input', type=str, required=True, help='Input file')
     args = parser.parse_args()
     af = args.af
@@ -62,8 +62,8 @@ def main():
 
 
     # store the data
-    for i, row in mutational_burden.iterrows():
-        arr = row[:-1].values
+    for i, row in mutational_burden.groupby(level=0):
+        arr = row.iloc[:, :-1].values
         arr = arr.astype('float32')
         np.save(f'{output}/af_{af}/feats/{i}.npy', np.array([arr]))
     infocsv.to_csv(f'{output}/af_{af}/info.csv', index=False)
