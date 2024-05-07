@@ -19,7 +19,7 @@ counter=0
 
 while [ $counter -lt $max_iterations ]
 do
-    python gnn.py --num_workers 2 --random_state $counter --data_path /blue/sai.zhang/mkjellbe.stanford/gnn_data --dataset af_0.05 --af 0.05 --logo --shuffle_controls
+    python gnn.py --num_workers 2 --random_state $counter --data_path /blue/sai.zhang/mkjellbe.stanford/gnn_dataEUR0.99 --dataset af_0.05 --af 0.05 --logo --shuffle_controls
     counter=$((counter + 1))
     echo "Iteration $((counter+1)) completed. Starting over..."
 done

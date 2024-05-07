@@ -55,9 +55,10 @@ def main():
 
 
     # Create the info.csv file
-    infocsv = mutational_burden.iloc[:, -1:].copy()
-    infocsv = infocsv.reset_index()
-    infocsv = infocsv.rename(columns={'index': 'sample_id', 'case': 'label'})
+    info = mutational_burden.iloc[:, -1].copy()
+    infocsv = info.groupby(level=0).last().to_frame()
+    infocsv.reset_index(inplace=True)
+    infocsv.rename(columns={'sample': 'sample_id', 'case': 'label'}, inplace=True)
     infocsv['ancestry'] = 'EUR'
 
 
@@ -65,7 +66,7 @@ def main():
     for i, row in mutational_burden.groupby(level=0):
         arr = row.iloc[:, :-1].values
         arr = arr.astype('float32')
-        np.save(f'{output}/af_{af}/feats/{i}.npy', np.array([arr]))
+        np.save(f'{output}/af_{af}/feats/{i}.npy', np.array([arr]).flatten())
     infocsv.to_csv(f'{output}/af_{af}/info.csv', index=False)
 
 
