@@ -3,10 +3,11 @@
 #SBATCH --mail-type=END,FAIL          # Mail events (NONE, BEGIN, END, FAIL, ALL)
 #SBATCH --mail-user=mkjellbe@stanford.edu     # Where to send mail
 #SBATCH --ntasks=1                    # Run on a single CPU
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=32gb                     # Job memory request
 #SBATCH --time=00:30:00               # Time limit hrs:min:sec
 #SBATCH --output=preprocess_gnn_%j.log   # Standard output and error log
+#SBATCH --partition=bigmem
 pwd; hostname; date
 
 module load conda
