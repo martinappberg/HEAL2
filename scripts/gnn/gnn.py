@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument("--bootstrap", action="store_true")
     parser.add_argument("--silent", action="store_true")
     parser.add_argument("-rs", "--random_state", type=int, default=42)
+    parser.add_argument("-o", "--output", type=str, default=".")
     args = parser.parse_args()
     return args
 
@@ -173,14 +174,17 @@ if __name__ == '__main__':
     device = torch.device('cuda' if (torch.cuda.is_available()) else 'cpu')
     trainer = Trainer(device=device, log_interval=20, n_early_stop=20)
 
-    filename = f"/home/mkjellbe/mecfs/gnn/prsnet_output_{args.cohort}cohort_{args.shuffle_controls}shufflecontrols_{args.bootstrap}bootstrap_{args.logo}logo_{args.af}af_exc{args.exclude}.csv"
+    filename = f"{args.output}/prsnet_output_{args.cohort}cohort_{args.shuffle_controls}shufflecontrols_{args.bootstrap}bootstrap_{args.logo}logo_{args.af}af_exc{args.exclude}.csv"
 
     case_control_counts = info_df.groupby(['group', 'label']).size().unstack(fill_value=0)
     print("\nCase and Control counts per group:")
     print(case_control_counts)
 
-    train_size = 32
-    learning_rate = 1e-4 * (train_size / 128)
+    train_size = 64
+    learning_rate = 1e-4 #* (train_size / 128)
+    weight_decay = 10e-2
+    features = 78
+    n_layers = 2
 
     ## Validation
     for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
@@ -198,9 +202,9 @@ if __name__ == '__main__':
         val_loader = DataLoader(val_set, batch_size=int(train_size / 2), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         test_loader = DataLoader(test_set, batch_size=int(train_size / 2), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
-        model = PRSNet(n_genes=num_nodes, n_layers=2, d_input=1).to(device)
+        model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
-        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         metric = AUROC(task='binary')
         
         best_val_score, best_test_score, test_attn_scores = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
@@ -235,12 +239,12 @@ if __name__ == '__main__':
     full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
     # Reinit model
-    model = PRSNet(n_genes=num_nodes, n_layers=2, d_input=1).to(device)
+    model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
     loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     full_attn_scores = trainer.train_full_dataset(model, ggi_graph, loss_fn, optimizer, full_loader)
 
-    torch.save(full_attn_scores, f'test_attn_scores_{args.random_state}.pt')
+    torch.save(full_attn_scores, f'{args.output}/test_attn_scores_{args.random_state}.pt')
 
         

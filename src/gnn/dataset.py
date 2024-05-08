@@ -1,5 +1,6 @@
 import torch
 import random
+import numpy as np
 from .utils import load
 
 
@@ -36,7 +37,7 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
             index = self.__balanced_sampling__()
         sample_id = self.sample_ids[index]
         label = self.labels[index]
-        feat = load(f'{self.data_path}/{self.dataset}/feats/{sample_id}.npy')[0] # type: ignore
+        feat = np.load(f'{self.data_path}/{self.dataset}/feats/{sample_id}.npy') # type: ignore
         if self.multiple_ancestries:
             return {"feat":feat, "ancestry":torch.FloatTensor([self.ancestries[index]]), "label":label} # type: ignore
         else:
