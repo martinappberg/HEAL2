@@ -14,7 +14,7 @@ import json
 warnings.filterwarnings("ignore")
 
 # SKLearn
-from sklearn.model_selection import train_test_split, LeaveOneGroupOut
+from sklearn.model_selection import train_test_split, LeaveOneGroupOut, StratifiedKFold
 
 from src.gnn.dataset import Dataset
 from src.gnn.utils import generate_splits, seed_worker, collate_fn, ancestry_encoding, set_random_seed
@@ -22,6 +22,13 @@ from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
 import os
+
+def create_dir_if_not_exists(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+        print(f"Directory '{directory_path}' created.")
+    else:
+        print(f"Directory '{directory_path}' already exists.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Arguments for training GNN")
@@ -32,6 +39,8 @@ def parse_args():
     parser.add_argument("--exclude", type=str, default=None)
     parser.add_argument("--cohort", type=str, default="full")
     parser.add_argument("--logo", action="store_true")
+    parser.add_argument("--stratified_kfold", action="store_true")
+    parser.add_argument("--test_group", type=str, default=None)
     parser.add_argument("--shuffle_controls", action="store_true")
     parser.add_argument("--bootstrap", action="store_true")
     parser.add_argument("--silent", action="store_true")
@@ -83,7 +92,24 @@ def sk_splits(labels, test_ratio=0.2, val_ratio=0.2, n_splits=3, random_state=42
         final_train_indices, val_indices = train_test_split(
             train_indices, test_size=val_ratio, stratify=labels[train_indices], random_state=(random_state*rs))
 
-        splits.append((final_train_indices, val_indices, test_indices, 'all', 'all', 'all'))
+        splits.append((final_train_indices, val_indices, test_indices, f'tts', 'tts', 'tts'))
+
+    return splits
+
+def stratified_k_fold_splits(labels, test_ratio=0.2, n_splits=3, random_state=42, test_indices=None, test_group='skf'):
+    splits = []
+    indices = np.arange(len(labels))
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    if test_indices is None:
+        train_indices, test_indices = train_test_split(
+                indices, test_size=test_ratio, stratify=labels, random_state=(random_state))
+    else:
+        train_indices = np.setdiff1d(indices, test_indices)
+    # Generate folds
+    for train_index, val_index in skf.split(train_indices, labels[train_indices]):
+        # Here, you get indices for training and test in each fold
+        splits.append((train_indices[train_index], train_indices[val_index], test_indices, 'skf', 'skf', test_group))
 
     return splits
 
@@ -162,6 +188,12 @@ if __name__ == '__main__':
 
     if args.logo:
         splits = logo_splits(labels, groups, random_state=args.random_state)
+    elif args.stratified_kfold is not None:
+        if args.test_group is not None:
+            test_indices = info_df[info_df['group'] == args.test_group].index.values
+            splits = stratified_k_fold_splits(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
+        else:
+            splits = stratified_k_fold_splits(labels, random_state=args.random_state)
     else:
         splits = sk_splits(labels, random_state=args.random_state)
     
@@ -180,11 +212,11 @@ if __name__ == '__main__':
     print("\nCase and Control counts per group:")
     print(case_control_counts)
 
-    train_size = 64
-    learning_rate = 1e-4 #* (train_size / 128)
-    weight_decay = 10e-2
+    train_size = 16
+    learning_rate = 1e-4 * (train_size / 256)
+    weight_decay = 1e-6
     features = 78
-    n_layers = 2
+    n_layers = 1
 
     ## Validation
     for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
@@ -199,21 +231,24 @@ if __name__ == '__main__':
         test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False)
 
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-        val_loader = DataLoader(val_set, batch_size=int(train_size / 2), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-        test_loader = DataLoader(test_set, batch_size=int(train_size / 2), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        test_loader = DataLoader(test_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
         model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         metric = AUROC(task='binary')
         
-        best_val_score, best_test_score, test_attn_scores = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
+        best_val_score, best_test_score, train_attn_scores = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
 
         if not args.silent:
-            ## Store everything in a results_df
+            ## Store everything in a results_df and attention scores
+            ## Create output directory
+            create_dir_if_not_exists(args.output)
+            create_dir_if_not_exists(f"{args.output}/attn_scores")
 
             # Combine additional split details
             results_df = pd.DataFrame({
@@ -228,23 +263,8 @@ if __name__ == '__main__':
 
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
-    
-    ## Full model for attention
-    # del model and retrain on the big one
-    del model
-    del optimizer
-    del loss_fn
 
-    full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids, labels=labels, balanced_sampling=True)
-    full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-
-    # Reinit model
-    model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
-    loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-
-    full_attn_scores = trainer.train_full_dataset(model, ggi_graph, loss_fn, optimizer, full_loader)
-
-    torch.save(full_attn_scores, f'{args.output}/test_attn_scores_{args.random_state}.pt')
+            # Store the attention scores
+            torch.save(train_attn_scores, f'{args.output}/attn_scores/test_attn_scores_train{str(train_groups)}_test{str(test_groups)}_{args.random_state}.pt')
 
         

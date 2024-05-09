@@ -69,7 +69,7 @@ class Trainer:
                 print(f"[{cur_step+1}] val_score: {best_val_score:.3f}, test_score: {best_test_score: .3f}", flush=True)
                 print("----------------Training----------------", flush=True)
             if cur_step == self.n_steps: break
-        return best_val_score, best_test_score, test_attn_scores
+        return best_val_score, best_test_score, attn_scores
         
     def evaluate(self, model, ggi_graph, test_loader, metric):
         with torch.no_grad():
