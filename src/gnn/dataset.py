@@ -41,4 +41,4 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
         if self.multiple_ancestries:
             return {"feat":feat, "ancestry":torch.FloatTensor([self.ancestries[index]]), "label":label} # type: ignore
         else:
-            return {"feat":feat, "label":label}
+            return {"feat":feat, "label":label, "sample_id": sample_id}

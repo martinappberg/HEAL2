@@ -3,6 +3,10 @@ import random
 import torch
 import dgl
 
+import os
+# SKLearn
+from sklearn.model_selection import train_test_split, LeaveOneGroupOut, StratifiedKFold
+
 def set_random_seed(seed=22):
     random.seed(seed)
     np.random.seed(seed)
@@ -87,9 +91,10 @@ def collate_fn_ma(batch):
 def collate_fn(batch):
     feats = [sample['feat'] for sample in batch]
     labels = [sample['label'] for sample in batch]
+    sample_ids = [sample['sample_id'] for sample in batch]
     feats = torch.from_numpy(np.stack(feats)).to(torch.float32)
     labels = torch.FloatTensor(labels).to(torch.float32).reshape(-1,1)
-    return feats, labels
+    return feats, labels, sample_ids
 
 def ancestry_encoding(ancestries):
     encoded_ancestries = []
@@ -103,3 +108,81 @@ def ancestry_encoding(ancestries):
         else:
             encoded_ancestries.append(3)
     return encoded_ancestries
+
+## UTILS FOR VALIDATION
+def create_dir_if_not_exists(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+        print(f"Directory '{directory_path}' created.")
+    else:
+        print(f"Directory '{directory_path}' already exists.")
+
+def logo_splits(labels, groups, val_ratio=0.1, random_state=42):
+    """
+    Generate train, validation, and test splits using Leave-One-Group-Out strategy.
+
+    Args:
+    - labels (array-like): Target labels.
+    - groups (array-like): Group labels defining the splits.
+    - val_ratio (float): Proportion of the dataset to include in the validation split.
+
+    Returns:
+    - splits (list of tuples): List containing train, validation, and test indices for each split.
+    """
+    logo = LeaveOneGroupOut()
+    splits = []
+
+    for train_val_idx, test_idx in logo.split(np.zeros(len(labels)), labels, groups):
+        test_group = np.unique(groups[test_idx])
+        # Within each LOGO split, further split the training set into training and validation sets
+        if val_ratio > 0:
+            # Ensure stratification by labels within the training set
+            train_idx, val_idx = train_test_split(train_val_idx, test_size=val_ratio, stratify=labels[train_val_idx], random_state=random_state)
+            train_groups = np.unique(groups[train_idx])
+            val_groups = np.unique(groups[val_idx])
+            splits.append((train_idx, val_idx, test_idx, train_groups, val_groups, test_group))
+        else:
+            # No validation split, use all training data as is
+            train_groups = np.unique(groups[train_val_idx])
+            splits.append((train_val_idx, [], test_idx, train_groups, [], test_group))
+
+    return splits
+
+def sk_splits(labels, test_ratio=0.2, val_ratio=0.2, n_splits=3, random_state=42):
+    splits = []
+    indices = np.arange(len(labels))
+    for rs in range(n_splits):
+        # Initial split into training and testing
+        train_indices, test_indices = train_test_split(
+            indices, test_size=test_ratio, stratify=labels, random_state=(random_state*rs))
+
+        # Further split the training set to create a validation set
+        final_train_indices, val_indices = train_test_split(
+            train_indices, test_size=val_ratio, stratify=labels[train_indices], random_state=(random_state*rs))
+
+        splits.append((final_train_indices, val_indices, test_indices, f'tts', 'tts', 'tts'))
+
+    return splits
+
+def stratified_k_fold_splits(labels, test_ratio=0.2, n_splits=3, random_state=42, test_indices=None, test_group='skf'):
+    splits = []
+    indices = np.arange(len(labels))
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    if test_indices is None:
+        train_indices, test_indices = train_test_split(
+                indices, test_size=test_ratio, stratify=labels, random_state=(random_state))
+    else:
+        train_indices = np.setdiff1d(indices, test_indices)
+    # Generate folds
+    for train_index, val_index in skf.split(train_indices, labels[train_indices]):
+        # Here, you get indices for training and test in each fold
+        splits.append((train_indices[train_index], train_indices[val_index], test_indices, 'skf', 'skf', test_group))
+
+    return splits
+
+def validation_split(labels, ratio=0.2, random_state=42):
+    indices = np.arange(len(labels))
+    train_indices, val_indices = train_test_split(
+            indices, test_size=ratio, stratify=labels, random_state=random_state)
+    return train_indices, val_indices

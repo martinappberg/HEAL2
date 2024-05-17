@@ -13,22 +13,12 @@ import numpy as np
 import json
 warnings.filterwarnings("ignore")
 
-# SKLearn
-from sklearn.model_selection import train_test_split, LeaveOneGroupOut, StratifiedKFold
-
 from src.gnn.dataset import Dataset
-from src.gnn.utils import generate_splits, seed_worker, collate_fn, ancestry_encoding, set_random_seed
+from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
+from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, create_dir_if_not_exists
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
-import os
-
-def create_dir_if_not_exists(directory_path):
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-        print(f"Directory '{directory_path}' created.")
-    else:
-        print(f"Directory '{directory_path}' already exists.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Arguments for training GNN")
@@ -48,70 +38,6 @@ def parse_args():
     parser.add_argument("-o", "--output", type=str, default=".")
     args = parser.parse_args()
     return args
-
-def logo_splits(labels, groups, val_ratio=0.1, random_state=42):
-    """
-    Generate train, validation, and test splits using Leave-One-Group-Out strategy.
-
-    Args:
-    - labels (array-like): Target labels.
-    - groups (array-like): Group labels defining the splits.
-    - val_ratio (float): Proportion of the dataset to include in the validation split.
-
-    Returns:
-    - splits (list of tuples): List containing train, validation, and test indices for each split.
-    """
-    logo = LeaveOneGroupOut()
-    splits = []
-
-    for train_val_idx, test_idx in logo.split(np.zeros(len(labels)), labels, groups):
-        test_group = np.unique(groups[test_idx])
-        # Within each LOGO split, further split the training set into training and validation sets
-        if val_ratio > 0:
-            # Ensure stratification by labels within the training set
-            train_idx, val_idx = train_test_split(train_val_idx, test_size=val_ratio, stratify=labels[train_val_idx], random_state=random_state)
-            train_groups = np.unique(groups[train_idx])
-            val_groups = np.unique(groups[val_idx])
-            splits.append((train_idx, val_idx, test_idx, train_groups, val_groups, test_group))
-        else:
-            # No validation split, use all training data as is
-            train_groups = np.unique(groups[train_val_idx])
-            splits.append((train_val_idx, [], test_idx, train_groups, [], test_group))
-
-    return splits
-
-def sk_splits(labels, test_ratio=0.2, val_ratio=0.2, n_splits=3, random_state=42):
-    splits = []
-    indices = np.arange(len(labels))
-    for rs in range(n_splits):
-        # Initial split into training and testing
-        train_indices, test_indices = train_test_split(
-            indices, test_size=test_ratio, stratify=labels, random_state=(random_state*rs))
-
-        # Further split the training set to create a validation set
-        final_train_indices, val_indices = train_test_split(
-            train_indices, test_size=val_ratio, stratify=labels[train_indices], random_state=(random_state*rs))
-
-        splits.append((final_train_indices, val_indices, test_indices, f'tts', 'tts', 'tts'))
-
-    return splits
-
-def stratified_k_fold_splits(labels, test_ratio=0.2, n_splits=3, random_state=42, test_indices=None, test_group='skf'):
-    splits = []
-    indices = np.arange(len(labels))
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-
-    if test_indices is None:
-        train_indices, test_indices = train_test_split(
-                indices, test_size=test_ratio, stratify=labels, random_state=(random_state))
-    else:
-        train_indices = np.setdiff1d(indices, test_indices)
-    # Generate folds
-    for train_index, val_index in skf.split(train_indices, labels[train_indices]):
-        # Here, you get indices for training and test in each fold
-        splits.append((train_indices[train_index], train_indices[val_index], test_indices, 'skf', 'skf', test_group))
-
-    return splits
 
 if __name__ == '__main__':
     args = parse_args()
@@ -239,7 +165,7 @@ if __name__ == '__main__':
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         metric = AUROC(task='binary')
         
-        best_val_score, best_test_score, train_attn_scores = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
+        best_val_score, best_test_score, _, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
@@ -263,8 +189,5 @@ if __name__ == '__main__':
 
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
-
-            # Store the attention scores
-            torch.save(train_attn_scores, f'{args.output}/attn_scores/test_attn_scores_train{str(train_groups)}_test{str(test_groups)}_{args.random_state}.pt')
 
         
