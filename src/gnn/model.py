@@ -93,6 +93,36 @@ class AttentiveReadout(nn.Module):
             g.ndata['v'] = self.value_layer(feats)
             h = sum_nodes(g, 'v', 'w')
             return h, g.ndata['w']
+        
+class MultiHeadAttentiveReadout(nn.Module):
+    def __init__(self, in_feats, num_heads=4):
+        super(MultiHeadAttentiveReadout, self).__init__()
+        self.num_heads = num_heads
+        self.key_layers = nn.ModuleList([nn.Linear(in_feats, in_feats) for _ in range(num_heads)])
+        self.query_layers = nn.ModuleList([nn.Linear(in_feats, 1, bias=False) for _ in range(num_heads)])
+        self.value_layers = nn.ModuleList([nn.Linear(in_feats, in_feats) for _ in range(num_heads)])
+        self.proj = nn.Linear(num_heads * in_feats, in_feats)
+
+    def forward(self, g, feats):
+        with g.local_scope():
+            all_weights = []
+            all_values = []
+            for i in range(self.num_heads):
+                keys = self.key_layers[i](feats)
+                queries = torch.sigmoid(self.query_layers[i](keys))
+                g.ndata[f'w_{i}'] = queries
+                g.ndata[f'v_{i}'] = self.value_layers[i](feats)
+                all_weights.append(g.ndata[f'w_{i}'])
+                all_values.append(g.ndata[f'v_{i}'])
+            
+            # Average the attention weights across heads
+            avg_weights = torch.mean(torch.stack(all_weights, dim=-1), dim=-1)
+            g.ndata['w_avg'] = avg_weights
+            g.ndata['v_avg'] = torch.mean(torch.stack(all_values, dim=-1), dim=-1)
+
+            # Use the average weights to sum the node values
+            h = sum_nodes(g, 'v_avg', 'w_avg')  # Sum using the averaged weights
+            return h, avg_weights
 
 class PRSNet(torch.nn.Module):
     def __init__(self, multiple_ancestries=False, d_input=11, d_hidden=64, n_gene_encode_layer=1, n_layers=1, n_genes=19836, n_predictor_layer=2, mlp_hidden_ratio=1):
@@ -122,6 +152,7 @@ class PRSNet(torch.nn.Module):
             self.readout = AttentiveReadoutMOE(d_hidden)
         else:
             self.readout = AttentiveReadout(d_hidden)
+            #self.readout = MultiHeadAttentiveReadout(d_hidden)
         ## Predictor
         self.predictor = MLP(d_input=d_hidden, d_hidden=d_hidden, d_output=1, n_layers=n_predictor_layer, dropout=0, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=False)
         ## Parameter initialization

@@ -6,7 +6,7 @@ import warnings
 import torch
 from torch.utils.data import DataLoader
 from torch import nn
-from torchmetrics import AUROC, PrecisionRecallCurve
+from torchmetrics import AUROC, AveragePrecision
 import dgl
 import pandas as pd
 import numpy as np
@@ -141,7 +141,7 @@ if __name__ == '__main__':
     train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
     val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
 
-    train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+    train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
     model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
@@ -149,9 +149,22 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     metric = AUROC(task='binary')
         
-    best_val_score, best_test_score, train_attn_list, val_attn_list, test_attn_list = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, None)
+    best_val_score, best_test_score, train_attn_list, val_attn_list, test_attn_list, best_model = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, None)
     print(f"----------------Final result----------------", flush=True)
     print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
+
+    ## Delete current models
+    del model
+    del optimizer
+
+    full_model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features)
+    full_model.load_state_dict(best_model)
+    full_model.to(device)
+
+    full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids,labels=labels, balanced_sampling=False)
+    full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+
+    full_score, full_attn_list = trainer.evaluate(full_model, ggi_graph, full_loader, metric)
 
     if not args.silent:
         ## Store everything in a results_df and attention scores
@@ -170,12 +183,7 @@ if __name__ == '__main__':
         # Append to CSV with header written only once
         results_df.to_csv(filename, mode='a', header=False, index=False)
 
-        train_attn_df = pd.DataFrame.from_dict(train_attn_list, orient='index', columns=gti_arr)
-        val_attn_df = pd.DataFrame.from_dict(val_attn_list, orient='index', columns=gti_arr)
-        test_attn_df = pd.DataFrame.from_dict(test_attn_list, orient='index', columns=gti_arr)
-
-        train_attn_df.to_csv(f'{args.output}/attn_scores/train_attn_scores_{args.random_state}.csv')
-        val_attn_df.to_csv(f'{args.output}/attn_scores/val_attn_scores_{args.random_state}.csv')
-        test_attn_df.to_csv(f'{args.output}/attn_scores/test_attn_scores_{args.random_state}.csv')
+        full_attn_df = pd.DataFrame.from_dict(full_attn_list, orient='index', columns=gti_arr)
+        full_attn_df.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}.csv')
 
         

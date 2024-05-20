@@ -25,6 +25,7 @@ class Trainer:
         return labels, outputs, ph_attn_scores, anc_attn_scores
     def train_and_test(self, model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader):
         best_val_score, best_test_score = 0, 0
+        best_model_state = None
         running_loss = []
         cur_early_stop = 0
         best_train_attn_list = {}
@@ -53,6 +54,10 @@ class Trainer:
                 labels, preds, ph_attn_scores, anc_attn_scores = self.forward_batch_ma(model, ggi_graph, batch)
             else:
                 labels, preds, attn_scores, sample_ids = self.forward_batch(model, ggi_graph, batch)
+                ## TRAIN
+                attn_scores = attn_scores.detach().cpu().numpy()
+                for i, sample in enumerate(sample_ids):
+                    best_train_attn_list[sample] = attn_scores[i, :]
 
             loss = loss_fn(preds, labels)
 
@@ -70,17 +75,13 @@ class Trainer:
                 val_score, val_attn_list = self.evaluate(model, ggi_graph, val_loader, metric)
                 if val_score > best_val_score:
                     best_val_score = val_score
+                    # Store best model
+                    best_model_state = model.state_dict()
                     ## Best model, add the attentions
-                    ## TRAIN
-                    attn_scores = attn_scores.detach().cpu().numpy()
-                    for i, sample in enumerate(sample_ids):
-                        best_train_attn_list[sample] = attn_scores[i, :]
                     ## VAL
                     best_val_attn_list = val_attn_list
                     if test_loader is not None:
-                        best_test_score, test_attn_list = self.evaluate(model, ggi_graph, test_loader, metric)
-                        ## TEST
-                        best_test_attn_list = test_attn_list
+                        best_test_score, best_test_attn_list = self.evaluate(model, ggi_graph, test_loader, metric)
                     cur_early_stop = 0
                 else:
                     cur_early_stop += 1
@@ -89,7 +90,7 @@ class Trainer:
                 print(f"[{cur_step+1}] cur_val_score: {val_score:.3f}, best_val_score: {best_val_score:.3f}, test_score: {best_test_score: .3f}", flush=True)
                 print("----------------Training----------------", flush=True)
             if cur_step == self.n_steps: break
-        return best_val_score, best_test_score, best_train_attn_list, best_val_attn_list, best_test_attn_list
+        return best_val_score, best_test_score, best_train_attn_list, best_val_attn_list, best_test_attn_list, best_model_state
         
     def evaluate(self, model, ggi_graph, test_loader, metric):
         with torch.no_grad():
@@ -110,57 +111,4 @@ class Trainer:
             preds = torch.cat(preds_list).reshape(-1)
             labels = torch.cat(labels_list).reshape(-1)
 
-            return metric(preds, labels).item(), attn_list
-        
-    def train_full_dataset(self, model, ggi_graph, loss_fn, optimizer, full_loader):
-        print("----------------Training on Full Dataset----------------", flush=True)
-        moving_avg_loss = []
-        patience = 10
-        min_delta = 0.001
-        patience_counter = 0
-        prev_avg_loss = None
-
-        data_iter = iter(full_loader)
-        next_batch = next(data_iter)
-        next_batch = [ _.cuda(non_blocking=True) for _ in next_batch ]
-
-        for cur_step in range(len(full_loader)):
-            model.train()
-            optimizer.zero_grad()
-            batch = next_batch 
-
-            if cur_step + 1 != len(full_loader): 
-                next_batch = next(data_iter)
-                next_batch = [ _.cuda(non_blocking=True) for _ in next_batch]
-
-            labels, preds, attn_scores = self.forward_batch(model, ggi_graph, batch)
-
-            loss = loss_fn(preds, labels)
-
-            # Backward pass and optimization
-            loss.backward()
-            optimizer.step()
-
-            # Update moving average of the loss
-            if len(moving_avg_loss) < 100:
-                moving_avg_loss.append(loss.item())
-            else:
-                moving_avg_loss.pop(0)
-                moving_avg_loss.append(loss.item())
-
-            if (cur_step+1) % self.log_interval == 0:
-                current_avg_loss = np.mean(moving_avg_loss)
-                print(f"[{cur_step+1}] loss: {current_avg_loss:.3f}", flush=True)
-                
-                # Check for convergence
-                if prev_avg_loss is not None and cur_step != 0 and abs(prev_avg_loss - current_avg_loss) < min_delta:
-                    patience_counter += 1
-                    if patience_counter >= patience:
-                        print("Loss convergence achieved, stopping training.")
-                        break
-                else:
-                    patience_counter = 0
-                
-                prev_avg_loss = current_avg_loss
-
-        return attn_scores
+            return metric(preds, labels.int()).item(), attn_list

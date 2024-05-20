@@ -165,7 +165,7 @@ if __name__ == '__main__':
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         metric = AUROC(task='binary')
         
-        best_val_score, best_test_score, _, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
+        best_val_score, best_test_score, _, _, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
