@@ -150,11 +150,16 @@ if __name__ == '__main__':
         model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        metric = AUROC(task='binary')
+        metric_auroc = AUROC(task='binary')
+        metric_auprc = AveragePrecision(task='binary')
+        metric_funcs = {
+            'auroc': metric_auroc,
+            'auprc': metric_auprc,
+        }
             
-        best_val_score, best_test_score, _, _, _, best_model, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, None)
+        best_val_scores, best_test_scores, _, _, _, best_model, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
         print(f"----------------Final result----------------", flush=True)
-        print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
+        print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
         ## Delete current models
         del model
@@ -167,7 +172,7 @@ if __name__ == '__main__':
         full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids,labels=labels, balanced_sampling=False)
         full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
-        full_score, full_attn_list = trainer.evaluate(full_model, ggi_graph, full_loader, metric)
+        full_score, full_attn_list, _ = trainer.evaluate(full_model, ggi_graph, full_loader, metric_funcs)
 
         if not args.silent:
             ## Store everything in a results_df and attention scores
@@ -175,13 +180,22 @@ if __name__ == '__main__':
             create_dir_if_not_exists(args.output)
             create_dir_if_not_exists(f"{args.output}/attn_scores")
 
-            # Combine additional split details
-            results_df = pd.DataFrame({
+            results_data = {
                 "Split ID": [split_id],
                 "Random State": [args.random_state],
-                "Best Validation Score": [best_val_score],
-                "Best Test Score": [best_test_score]
-            })
+                "Train groups": [str(train_groups)],
+                "Validation groups": [str(val_groups)],
+                "Test groups": [str(test_groups)],
+            }
+            # Add best validation scores to results data
+            for metric_name, score in best_val_scores.items():
+                results_data[f"Validation ({metric_name})"] = [score]
+
+            # Add best test scores to results data
+            for metric_name, score in best_test_scores.items():
+                results_data[f"Test ({metric_name})"] = [score]
+
+            results_df = pd.DataFrame(results_data)
 
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)

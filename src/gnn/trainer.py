@@ -32,6 +32,7 @@ class Trainer:
         best_val_attn_list = {}
         best_test_attn_list = {}
         best_val_predictions = {}
+        test_predictions = {}
 
         data_iter = iter(train_loader)
         next_batch = next(data_iter)
