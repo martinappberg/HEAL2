@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 from src.gnn.dataset import Dataset
 from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
-from src.gnn.utils import validation_split, create_dir_if_not_exists
+from src.gnn.utils import skf_validation_split, create_dir_if_not_exists
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
@@ -112,7 +112,8 @@ if __name__ == '__main__':
     groups = info_df['group'].values
     ancestries = ancestry_encoding(info_df['ancestry'].values)
 
-    train_ids, val_ids = validation_split(labels, random_state=args.random_state, ratio=0.3)
+
+    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=4)
     
 
     ggi_graph = dgl.load_graphs(f'{args.data_path}/ggi_graph_{args.af}.bin')[0][0]
@@ -135,55 +136,60 @@ if __name__ == '__main__':
     features = 78
     n_layers = 1
 
-    assert len(set(train_ids) & set(val_ids)) == 0, "Overlap found between training and validation sets"
+    all_attns = []
+    ## Validation
+    for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
+        print(f"\n\nBEGIN FULL TRAINING of split: {split_id}")
+        assert len(set(train_ids) & set(val_ids)) == 0, "Overlap found between training and validation sets"
+        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
+        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
 
-    print(f"\n\nBEGIN FULL TRAINING")
-    train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
-    val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
+        train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
-    train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
+        loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        metric = AUROC(task='binary')
+            
+        best_val_score, best_test_score, _, _, _, best_model, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, None)
+        print(f"----------------Final result----------------", flush=True)
+        print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
 
-    model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
-    loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    metric = AUROC(task='binary')
+        ## Delete current models
+        del model
+        del optimizer
+
+        full_model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features)
+        full_model.load_state_dict(best_model)
+        full_model.to(device)
+
+        full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids,labels=labels, balanced_sampling=False)
+        full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+
+        full_score, full_attn_list = trainer.evaluate(full_model, ggi_graph, full_loader, metric)
+
+        if not args.silent:
+            ## Store everything in a results_df and attention scores
+            ## Create output directory
+            create_dir_if_not_exists(args.output)
+            create_dir_if_not_exists(f"{args.output}/attn_scores")
+
+            # Combine additional split details
+            results_df = pd.DataFrame({
+                "Split ID": [split_id],
+                "Random State": [args.random_state],
+                "Best Validation Score": [best_val_score],
+                "Best Test Score": [best_test_score]
+            })
+
+            # Append to CSV with header written only once
+            results_df.to_csv(filename, mode='a', header=False, index=False)
+
+            full_attn_df = pd.DataFrame.from_dict(full_attn_list, orient='index', columns=gti_arr)
+            all_attns.append(full_attn_df)
         
-    best_val_score, best_test_score, train_attn_list, val_attn_list, test_attn_list, best_model = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, None)
-    print(f"----------------Final result----------------", flush=True)
-    print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
-
-    ## Delete current models
-    del model
-    del optimizer
-
-    full_model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features)
-    full_model.load_state_dict(best_model)
-    full_model.to(device)
-
-    full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids,labels=labels, balanced_sampling=False)
-    full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-
-    full_score, full_attn_list = trainer.evaluate(full_model, ggi_graph, full_loader, metric)
-
-    if not args.silent:
-        ## Store everything in a results_df and attention scores
-        ## Create output directory
-        create_dir_if_not_exists(args.output)
-        create_dir_if_not_exists(f"{args.output}/attn_scores")
-
-        # Combine additional split details
-        results_df = pd.DataFrame({
-            "Split ID": '[split_id]',
-            "Random State": [args.random_state],
-            "Best Validation Score": [best_val_score],
-            "Best Test Score": [best_test_score]
-        })
-
-        # Append to CSV with header written only once
-        results_df.to_csv(filename, mode='a', header=False, index=False)
-
-        full_attn_df = pd.DataFrame.from_dict(full_attn_list, orient='index', columns=gti_arr)
-        full_attn_df.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}.csv')
+    complete_attn = pd.concat(all_attns)
+    complete_attn.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}.csv')
 
         

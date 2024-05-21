@@ -186,3 +186,14 @@ def validation_split(labels, ratio=0.2, random_state=42):
     train_indices, val_indices = train_test_split(
             indices, test_size=ratio, stratify=labels, random_state=random_state)
     return train_indices, val_indices
+
+def skf_validation_split(labels, n_splits=3, random_state=42):
+    splits = []
+    indices = np.arange(len(labels))
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+    for train_index, val_index in skf.split(indices, labels[indices]):
+        # Here, you get indices for training and test in each fold
+        splits.append((indices[train_index], indices[val_index], None, 'skf_val', 'skf_val', 'skf_val'))
+
+    return splits

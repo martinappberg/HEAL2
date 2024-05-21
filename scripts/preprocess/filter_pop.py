@@ -47,7 +47,7 @@ def main():
             file_name, file_extension = os.path.splitext(file)  # Split the file name and the extension
             filtered_file_name = f"{file_name}_{args.threshold}{args.pop}filtered{file_extension}"  # Append '_filtered' before the extension
             filtered_file_path = os.path.join(output_dir, filtered_file_name)
-            filtered_df.to_csv(filtered_file_path, index_label=["sample", "gene"], sep='\t')
+            filtered_df.to_csv(filtered_file_path, sep='\t')
             
             print(f"{file_name}\n{filtered_df.shape[0]} samples remain after excluding {df.shape[0] - filtered_df.shape[0]} samples from original {df.shape[0]} samples")
 

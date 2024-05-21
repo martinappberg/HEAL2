@@ -182,8 +182,8 @@ def main():
         mutmatrix = pd.DataFrame(mutmatrix, 
                                         index=geno_complete.columns, 
                                         columns=pivot_table.columns)
-        mutmatrix.index.name = 'sample'
-        mutmatrix.columns.name = 'scores'
+    mutmatrix.index.name = 'sample'
+    mutmatrix.columns.name = 'scores'
         
     mutmatrix = mutmatrix.astype(pd.SparseDtype("float", 0.0))
     

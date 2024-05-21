@@ -6,7 +6,7 @@ import warnings
 import torch
 from torch.utils.data import DataLoader
 from torch import nn
-from torchmetrics import AUROC, PrecisionRecallCurve
+from torchmetrics import AUROC, AveragePrecision
 import dgl
 import pandas as pd
 import numpy as np
@@ -38,6 +38,12 @@ def parse_args():
     parser.add_argument("-o", "--output", type=str, default=".")
     args = parser.parse_args()
     return args
+
+def store_predictions(predictions_dict, output_dir, file_name):
+    # Create a DataFrame from the predictions dictionary
+    df = pd.DataFrame.from_dict(predictions_dict, orient='index')
+    # Save the DataFrame to a CSV file
+    df.to_csv(os.path.join(output_dir, file_name))
 
 if __name__ == '__main__':
     args = parse_args()
@@ -163,29 +169,49 @@ if __name__ == '__main__':
         model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
         optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        metric = AUROC(task='binary')
+        metric_auroc = AUROC(task='binary')
+        metric_auprc = AveragePrecision(task='binary')
+        metric_funcs = {
+            'auroc': metric_auroc,
+            'auprc': metric_auprc,
+        }
         
-        best_val_score, best_test_score, _, _, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric, train_loader, val_loader, test_loader)
+        best_val_scores, best_test_scores, _, _, _, _, val_predictions, test_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
-        print(f"best_val_score: {best_val_score}, best_test_score: {best_test_score}")
+        print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
         if not args.silent:
             ## Store everything in a results_df and attention scores
             ## Create output directory
             create_dir_if_not_exists(args.output)
             create_dir_if_not_exists(f"{args.output}/attn_scores")
+            create_dir_if_not_exists(f"{args.output}/val_predictions")
+            create_dir_if_not_exists(f"{args.output}/test_predictions")
+
+            # Store validation predictions
+            store_predictions(val_predictions, f"{args.output}/val_predictions", f"{args.random_state}rs_split{split_id}_val_predictions.csv")
+
+            # Store test predictions
+            store_predictions(test_predictions, f"{args.output}/test_predictions", f"{args.random_state}rs_split{split_id}_test_predictions.csv")
 
             # Combine additional split details
-            results_df = pd.DataFrame({
+            results_data = {
                 "Split ID": [split_id],
                 "Random State": [args.random_state],
                 "Train groups": [str(train_groups)],
                 "Validation groups": [str(val_groups)],
                 "Test groups": [str(test_groups)],
-                "Best Validation Score": [best_val_score],
-                "Best Test Score": [best_test_score]
-            })
+            }
+            # Add best validation scores to results data
+            for metric_name, score in best_val_scores.items():
+                results_data[f"Validation ({metric_name})"] = [score]
+
+            # Add best test scores to results data
+            for metric_name, score in best_test_scores.items():
+                results_data[f"Test ({metric_name})"] = [score]
+
+            results_df = pd.DataFrame(results_data)
 
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
