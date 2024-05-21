@@ -113,7 +113,7 @@ if __name__ == '__main__':
     ancestries = ancestry_encoding(info_df['ancestry'].values)
 
 
-    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=4)
+    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=3)
     
 
     ggi_graph = dgl.load_graphs(f'{args.data_path}/ggi_graph_{args.af}.bin')[0][0]

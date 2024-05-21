@@ -185,7 +185,6 @@ if __name__ == '__main__':
             ## Store everything in a results_df and attention scores
             ## Create output directory
             create_dir_if_not_exists(args.output)
-            create_dir_if_not_exists(f"{args.output}/attn_scores")
             create_dir_if_not_exists(f"{args.output}/val_predictions")
             create_dir_if_not_exists(f"{args.output}/test_predictions")
 
