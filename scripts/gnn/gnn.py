@@ -36,6 +36,9 @@ def parse_args():
     parser.add_argument("--silent", action="store_true")
     parser.add_argument("-rs", "--random_state", type=int, default=42)
     parser.add_argument("-o", "--output", type=str, default=".")
+    parser.add_argument('--pop', type=str, default=None, help='Which population to filter for (eg. EUR, EAS, etc.)')
+    parser.add_argument('--pop_file', type=str, default=None, help='Population file')
+    parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
     args = parser.parse_args()
     return args
 
@@ -51,6 +54,19 @@ if __name__ == '__main__':
     ## Data loading and splits generating
     # Load the DataFrame
     info_df = pd.read_csv(f'{args.data_path}/{args.dataset}/info.csv')
+    non_pop_samples = None
+
+    ## POP filter if we should
+    if args.pop is not None:
+        assert args.pop_file is not None, "Error: --pop_file must be specified if --pop is provided."
+        print(f"Will begin pop-filter of {info_df.shape[0]} samples for {args.pop} ≥ {args.pop_threshold}")
+        pop = pd.read_csv(args.pop_file)
+        pop = pop[pop[args.pop].astype(float) >= args.pop_threshold].copy()
+        pop.loc[:, 'IID'] = pop['FID'].astype(str).str.cat(pop['SID'].astype(str), sep='_')
+        pop = pop.set_index('IID', drop=True)
+        non_pop_samples = info_df[~info_df['sample_id'].isin(pop.index)]
+        info_df = info_df[info_df['sample_id'].isin(pop.index)].reset_index(drop=True)
+        print(f"Population filtered -> {info_df.shape[0]} samples remain, {non_pop_samples.shape[0]} filtered out")
 
     # Read gene to index
     json_data = open(f'{args.data_path}/gene_to_index_{args.af}.json', 'r')
@@ -147,7 +163,7 @@ if __name__ == '__main__':
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
     weight_decay = 1e-6
-    features = 78
+    features = 92
     n_layers = 1
 
     ## Validation
