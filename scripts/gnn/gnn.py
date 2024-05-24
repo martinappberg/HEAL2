@@ -176,7 +176,7 @@ if __name__ == '__main__':
         assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
 
         # Create temporary DataLoader to calculate mean and std
-        temp_train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids, labels=labels, balanced_sampling=False, rescaler=None)
+        temp_train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids], labels=labels[train_ids], balanced_sampling=False, rescaler=None)
         temp_train_loader = DataLoader(temp_train_set, batch_size=train_size, shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         # Initialize and fit Rescaler
         rescaler = Rescaler()
