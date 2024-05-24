@@ -19,6 +19,8 @@ from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, crea
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
+from src.gnn.rescaler import Rescaler
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Arguments for training GNN")
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
     weight_decay = 1e-6
-    features = 92
+    features = 78
     n_layers = 1
 
     ## Validation
@@ -173,10 +175,17 @@ if __name__ == '__main__':
         assert len(set(train_ids) & set(test_ids)) == 0, "Overlap found between training and test sets"
         assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
 
+        # Create temporary DataLoader to calculate mean and std
+        temp_train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids, labels=labels, balanced_sampling=False, rescaler=None)
+        temp_train_loader = DataLoader(temp_train_set, batch_size=train_size, shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        # Initialize and fit Rescaler
+        rescaler = Rescaler()
+        rescaler.fit(temp_train_loader)
+
         print(f"\n\nSplit {split_id} --> Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
-        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
-        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
-        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False)
+        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None)
+        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None)
+        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None)
 
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
