@@ -6,7 +6,7 @@ from .utils import load
 
 
 class Dataset(torch.utils.data.Dataset):  # type: ignore
-    def __init__(self, data_path, dataset, sample_ids, labels, balanced_sampling=False, ancestries=None, multiple_ancestries=False, shuffle_labels=False):
+    def __init__(self, data_path, dataset, sample_ids, labels, balanced_sampling=False, ancestries=None, multiple_ancestries=False, shuffle_labels=False, rescaler=None):
         self.sample_ids = sample_ids
         self.labels = labels
         if shuffle_labels:
@@ -23,6 +23,7 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
             self.n_samples = 10000000
         else:
             self.n_samples = len(self.labels)
+        self.rescaler = rescaler
     def __len__(self):
         return self.n_samples
 
@@ -38,6 +39,8 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
         sample_id = self.sample_ids[index]
         label = self.labels[index]
         feat = np.load(f'{self.data_path}/{self.dataset}/feats/{sample_id}.npy') # type: ignore
+        if self.rescaler is not None:
+            feat = self.rescaler.transform(torch.FloatTensor(feat))
         if self.multiple_ancestries:
             return {"feat":feat, "ancestry":torch.FloatTensor([self.ancestries[index]]), "label":label} # type: ignore
         else:

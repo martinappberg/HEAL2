@@ -19,6 +19,8 @@ from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, crea
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
+from src.gnn.rescaler import Rescaler
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Arguments for training GNN")
@@ -36,6 +38,9 @@ def parse_args():
     parser.add_argument("--silent", action="store_true")
     parser.add_argument("-rs", "--random_state", type=int, default=42)
     parser.add_argument("-o", "--output", type=str, default=".")
+    parser.add_argument('--pop', type=str, default=None, help='Which population to filter for (eg. EUR, EAS, etc.)')
+    parser.add_argument('--pop_file', type=str, default=None, help='Population file')
+    parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
     args = parser.parse_args()
     return args
 
@@ -51,6 +56,19 @@ if __name__ == '__main__':
     ## Data loading and splits generating
     # Load the DataFrame
     info_df = pd.read_csv(f'{args.data_path}/{args.dataset}/info.csv')
+    non_pop_samples = None
+
+    ## POP filter if we should
+    if args.pop is not None:
+        assert args.pop_file is not None, "Error: --pop_file must be specified if --pop is provided."
+        print(f"Will begin pop-filter of {info_df.shape[0]} samples for {args.pop} ≥ {args.pop_threshold}")
+        pop = pd.read_csv(args.pop_file)
+        pop = pop[pop[args.pop].astype(float) >= args.pop_threshold].copy()
+        pop.loc[:, 'IID'] = pop['FID'].astype(str).str.cat(pop['SID'].astype(str), sep='_')
+        pop = pop.set_index('IID', drop=True)
+        non_pop_samples = info_df[~info_df['sample_id'].isin(pop.index)]
+        info_df = info_df[info_df['sample_id'].isin(pop.index)].reset_index(drop=True)
+        print(f"Population filtered -> {info_df.shape[0]} samples remain, {non_pop_samples.shape[0]} filtered out")
 
     # Read gene to index
     json_data = open(f'{args.data_path}/gene_to_index_{args.af}.json', 'r')
@@ -157,10 +175,17 @@ if __name__ == '__main__':
         assert len(set(train_ids) & set(test_ids)) == 0, "Overlap found between training and test sets"
         assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
 
+        # Create temporary DataLoader to calculate mean and std
+        temp_train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids], labels=labels[train_ids], balanced_sampling=False, rescaler=None)
+        temp_train_loader = DataLoader(temp_train_set, batch_size=train_size, shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        # Initialize and fit Rescaler
+        rescaler = Rescaler()
+        rescaler.fit(temp_train_loader)
+
         print(f"\n\nSplit {split_id} --> Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
-        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
-        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
-        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False)
+        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None)
+        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None)
+        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None)
 
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
