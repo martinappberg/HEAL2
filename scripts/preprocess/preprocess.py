@@ -91,6 +91,8 @@ def main():
             insert_index = combined.shape[1] - n_samples - 1
             combined.insert(loc=insert_index, column='pLI_score', value=combined['temp_pLI_score'])
             combined.drop(columns=['temp_pLI_score'], inplace=True)
+    else:
+        combined = combined[combined['ExonicFunc.refGene'] == 'nonsynonymous_SNV']
 
     only_revel = combined if args.gnn else combined[combined['REVEL_score'] != '.']
 
