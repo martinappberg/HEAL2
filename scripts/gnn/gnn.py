@@ -140,7 +140,12 @@ if __name__ == '__main__':
         splits = logo_splits(labels, groups, random_state=args.random_state)
     elif args.stratified_kfold is not None:
         if args.test_group is not None:
-            test_indices = info_df[info_df['group'] == args.test_group].index.values
+            if args.test_group == "NON_POP":
+                sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
+                labels = torch.concatenate([labels, torch.from_numpy(non_pop_samples['label'].values)])
+                test_indices = non_pop_samples.index.values
+            else:
+                test_indices = info_df[info_df['group'] == args.test_group].index.values
             splits = stratified_k_fold_splits(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
         else:
             splits = stratified_k_fold_splits(labels, random_state=args.random_state)
@@ -174,13 +179,6 @@ if __name__ == '__main__':
         assert len(set(train_ids) & set(val_ids)) == 0, "Overlap found between training and validation sets"
         assert len(set(train_ids) & set(test_ids)) == 0, "Overlap found between training and test sets"
         assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
-
-        # Create temporary DataLoader to calculate mean and std
-        temp_train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids], labels=labels[train_ids], balanced_sampling=False, rescaler=None)
-        temp_train_loader = DataLoader(temp_train_set, batch_size=train_size, shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-        # Initialize and fit Rescaler
-        rescaler = Rescaler()
-        rescaler.fit(temp_train_loader)
 
         print(f"\n\nSplit {split_id} --> Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None)
