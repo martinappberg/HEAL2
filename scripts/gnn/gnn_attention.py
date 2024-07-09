@@ -130,7 +130,7 @@ if __name__ == '__main__':
     ancestries = ancestry_encoding(info_df['ancestry'].values)
 
 
-    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=3)
+    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=5)
     
 
     ggi_graph = dgl.load_graphs(f'{args.data_path}/ggi_graph_{args.af}.bin')[0][0]
@@ -139,7 +139,7 @@ if __name__ == '__main__':
 
     ## Device
     device = torch.device('cuda' if (torch.cuda.is_available()) else 'cpu')
-    trainer = Trainer(device=device, log_interval=20, n_early_stop=20)
+    trainer = Trainer(device=device, log_interval=20, n_early_stop=30)
 
     filename = f"{args.output}/prsnet_output_{args.cohort}cohort_{args.shuffle_controls}shufflecontrols_{args.bootstrap}bootstrap_{args.logo}logo_{args.af}af_exc{args.exclude}.csv"
 
@@ -154,6 +154,7 @@ if __name__ == '__main__':
     n_layers = 1
 
     all_attns = []
+    all_preds = []
     ## Validation
     for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
         print(f"\n\nBEGIN FULL TRAINING of split: {split_id}")
@@ -174,28 +175,16 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
             
-        best_val_scores, best_test_scores, _, _, _, best_model, _, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
+        best_val_scores, best_test_scores, _, best_val_attn_list, _, best_model, best_val_preds, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
         print(f"----------------Final result----------------", flush=True)
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
-
-        ## Delete current models
-        del model
-        del optimizer
-
-        full_model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features)
-        full_model.load_state_dict(best_model)
-        full_model.to(device)
-
-        full_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids,labels=labels, balanced_sampling=False)
-        full_loader = DataLoader(full_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
-
-        full_score, full_attn_list, _ = trainer.evaluate(full_model, ggi_graph, full_loader, metric_funcs)
 
         if not args.silent:
             ## Store everything in a results_df and attention scores
             ## Create output directory
             create_dir_if_not_exists(args.output)
             create_dir_if_not_exists(f"{args.output}/attn_scores")
+            create_dir_if_not_exists(f"{args.output}/preds")
 
             results_data = {
                 "Split ID": [split_id],
@@ -217,10 +206,17 @@ if __name__ == '__main__':
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
 
-            full_attn_df = pd.DataFrame.from_dict(full_attn_list, orient='index', columns=gti_arr)
+            full_attn_df = pd.DataFrame.from_dict(best_val_attn_list, orient='index', columns=gti_arr)
+            full_attn_df.loc[:, "split_id"] = split_id
             all_attns.append(full_attn_df)
+
+            preds_df = pd.DataFrame.from_dict(best_val_preds, orient='index')
+            all_preds.append(preds_df)
         
     complete_attn = pd.concat(all_attns)
     complete_attn.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}.csv')
+
+    complete_preds = pd.concat(all_preds)
+    complete_preds.to_csv(f'{args.output}/preds/preds_{args.random_state}.csv')
 
         

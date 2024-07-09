@@ -109,10 +109,14 @@ class Trainer:
                 preds_list.append(preds.detach())
                 labels_list.append(labels.detach())
                 attn_scores = attn_scores.detach().cpu().numpy()
+                
+                # Calculate sigmoid of predictions
+                sigmoid_preds = torch.sigmoid(preds)
+                
                 for i, sample in enumerate(sample_ids):
                     attn_list[sample] = attn_scores[i, :]
                     sample_id_dict[sample] = {
-                        'pred': torch.sigmoid(preds[i]).detach().cpu().numpy().item(),
+                        'pred': sigmoid_preds[i].detach().cpu().numpy().item(),
                         'label': labels[i].detach().cpu().numpy().item()
                     }
 

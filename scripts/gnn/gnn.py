@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 from src.gnn.dataset import Dataset
 from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
-from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, create_dir_if_not_exists
+from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, create_dir_if_not_exists, validation_split
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument("--cohort", type=str, default="full")
     parser.add_argument("--logo", action="store_true")
     parser.add_argument("--stratified_kfold", action="store_true")
+    parser.add_argument("--tts", action="store_true")
     parser.add_argument("--test_group", type=str, default=None)
     parser.add_argument("--shuffle_controls", action="store_true")
     parser.add_argument("--bootstrap", action="store_true")
@@ -138,7 +139,7 @@ if __name__ == '__main__':
 
     if args.logo:
         splits = logo_splits(labels, groups, random_state=args.random_state)
-    elif args.stratified_kfold is not None:
+    elif args.stratified_kfold:
         if args.test_group is not None:
             if args.test_group == "NON_POP":
                 sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
@@ -149,6 +150,17 @@ if __name__ == '__main__':
             splits = stratified_k_fold_splits(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
         else:
             splits = stratified_k_fold_splits(labels, random_state=args.random_state)
+    elif args.tts:
+        if args.test_group is not None:
+            if args.test_group == "NON_POP":
+                sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
+                labels = torch.concatenate([labels, torch.from_numpy(non_pop_samples['label'].values)])
+                test_indices = non_pop_samples.index.values
+            else:
+                test_indices = info_df[info_df['group'] == args.test_group].index.values
+            splits = validation_split(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
+        else:
+            splits = validation_split(labels, random_state=args.random_state)
     else:
         splits = sk_splits(labels, random_state=args.random_state)
     
@@ -162,10 +174,6 @@ if __name__ == '__main__':
     trainer = Trainer(device=device, log_interval=20, n_early_stop=20)
 
     filename = f"{args.output}/prsnet_output_{args.cohort}cohort_{args.shuffle_controls}shufflecontrols_{args.bootstrap}bootstrap_{args.logo}logo_{args.af}af_exc{args.exclude}.csv"
-
-    case_control_counts = info_df.groupby(['group', 'label']).size().unstack(fill_value=0)
-    print("\nCase and Control counts per group:")
-    print(case_control_counts)
 
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
@@ -184,6 +192,21 @@ if __name__ == '__main__':
         train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None)
         val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None)
         test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None)
+
+        case_control_counts_train = info_df.iloc[train_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        case_control_counts_val = info_df.iloc[val_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        case_control_counts_test = info_df.iloc[test_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        print("\nCase and Control counts per group:")
+        print("TRAIN:")
+        print(case_control_counts_train)
+        print("VAL:")
+        print(case_control_counts_val)
+        print("TEST:")
+        print(case_control_counts_test)
+
+        base_auprc_train = (labels[train_ids] == 1).sum().item() / labels[train_ids].shape[0]
+        base_auprc_val = (labels[val_ids] == 1).sum().item() / labels[val_ids].shape[0]
+        base_auprc_test = (labels[test_ids] == 1).sum().item() / labels[test_ids].shape[0]
 
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
@@ -224,6 +247,7 @@ if __name__ == '__main__':
                 "Train groups": [str(train_groups)],
                 "Validation groups": [str(val_groups)],
                 "Test groups": [str(test_groups)],
+                "Base AUPRC": [f"Train: {base_auprc_train} | Val: {base_auprc_val} | Test: {base_auprc_test}"]
             }
             # Add best validation scores to results data
             for metric_name, score in best_val_scores.items():
