@@ -125,7 +125,7 @@ class MultiHeadAttentiveReadout(nn.Module):
             return h, avg_weights
 
 class PRSNet(torch.nn.Module):
-    def __init__(self, multiple_ancestries=False, d_input=11, d_hidden=64, n_gene_encode_layer=1, n_layers=1, n_genes=19836, n_predictor_layer=2, mlp_hidden_ratio=1):
+    def __init__(self, multiple_ancestries=False, d_input=11, d_hidden=64, n_gene_encode_layer=1, n_layers=1, n_genes=19836, n_predictor_layer=2, mlp_hidden_ratio=1, n_covariates=0):
         super().__init__()
         self.multiple_ancestries = multiple_ancestries
         self.activation = nn.GELU()
@@ -154,10 +154,10 @@ class PRSNet(torch.nn.Module):
             self.readout = AttentiveReadout(d_hidden)
             #self.readout = MultiHeadAttentiveReadout(d_hidden)
         ## Predictor
-        self.predictor = MLP(d_input=d_hidden, d_hidden=d_hidden, d_output=1, n_layers=n_predictor_layer, dropout=0, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=False)
+        self.predictor = MLP(d_input=d_hidden + n_covariates, d_hidden=d_hidden, d_output=1, n_layers=n_predictor_layer, dropout=0, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=False)
         ## Parameter initialization
         self.apply(lambda module: bert_init_params(module))
-    def forward(self, g, x, ancestries=None):
+    def forward(self, g, x, ancestries=None, covariates=torch.empty(0)):
         ## Gene encoding
         x = x.reshape(x.shape[0],-1,self.d_input)
         batch_size, n_gene, d_feats = x.shape
@@ -179,5 +179,6 @@ class PRSNet(torch.nn.Module):
         else:
             g_h, weights = self.readout(g, hidden_rep[-1])
         ## Prediction
+        g_h = torch.cat([g_h, covariates], dim=1)
         preds = self.predictor(g_h)
         return preds, weights

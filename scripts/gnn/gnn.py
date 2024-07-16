@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument('--pop', type=str, default=None, help='Which population to filter for (eg. EUR, EAS, etc.)')
     parser.add_argument('--pop_file', type=str, default=None, help='Population file')
     parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
+    parser.add_argument('--covariates', type=str, default=None, help='File specifying the covariates')
     args = parser.parse_args()
     return args
 
@@ -53,7 +54,7 @@ def store_predictions(predictions_dict, output_dir, file_name):
 
 if __name__ == '__main__':
     args = parse_args()
-    set_random_seed(22)
+    set_random_seed(args.random_state)
     ## Data loading and splits generating
     # Load the DataFrame
     info_df = pd.read_csv(f'{args.data_path}/{args.dataset}/info.csv')
@@ -129,6 +130,15 @@ if __name__ == '__main__':
 
     assert info_df['sample_id'].nunique() == len(info_df), "Duplicated sample IDs found."
     
+    ## Add covariates if we should
+    n_covariates = 0
+    covariates = torch.empty((info_df.shape[0], 0))
+    if args.covariates is not None:
+        covariates_df = pd.read_csv(args.covariates)
+        n_covariates = covariates_df.shape[1] - 1
+        info_df = pd.merge(info_df, covariates_df, how='left', left_on='sample_id', right_on='sample_id')
+        covariates = torch.from_numpy(info_df.iloc[:, n_covariates:].values)
+    
 
     sample_ids = info_df['sample_id'].values
 
@@ -189,9 +199,9 @@ if __name__ == '__main__':
         assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
 
         print(f"\n\nSplit {split_id} --> Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
-        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None)
-        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None)
-        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None)
+        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None, covariates=covariates[train_ids])
+        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None, covariates=covariates[val_ids])
+        test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None, covariates=covariates[test_ids])
 
         case_control_counts_train = info_df.iloc[train_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
         case_control_counts_val = info_df.iloc[val_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
