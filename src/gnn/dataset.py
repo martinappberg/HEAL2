@@ -6,7 +6,7 @@ from .utils import load
 
 
 class Dataset(torch.utils.data.Dataset):  # type: ignore
-    def __init__(self, data_path, dataset, sample_ids, labels, balanced_sampling=False, ancestries=None, multiple_ancestries=False, shuffle_labels=False, rescaler=None, covariates=None):
+    def __init__(self, data_path, dataset, sample_ids, labels, covariates, balanced_sampling=False, ancestries=None, multiple_ancestries=False, shuffle_labels=False, rescaler=None):
         self.sample_ids = sample_ids
         self.labels = labels
         if shuffle_labels:
@@ -40,13 +40,11 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
             index = self.__balanced_sampling__()
         sample_id = self.sample_ids[index]
         label = self.labels[index]
+        covariate = self.covariates[index]
         feat = np.load(f'{self.data_path}/{self.dataset}/feats/{sample_id}.npy') # type: ignore
         if self.rescaler is not None:
             feat = self.rescaler.transform(torch.FloatTensor(feat))
         if self.multiple_ancestries:
             return {"feat":feat, "ancestry":torch.FloatTensor([self.ancestries[index]]), "label":label} # type: ignore
         else:
-            if self.covariates is not None:
-                return {"feat":feat, "label":label, "sample_id": sample_id, "covariate": self.covariates[index]}
-            else:
-                return {"feat":feat, "label":label, "sample_id": sample_id}
+            return {"feat":feat, "label":label, "sample_id": sample_id, "covariate": covariate}

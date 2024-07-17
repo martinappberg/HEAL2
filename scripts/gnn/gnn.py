@@ -137,7 +137,8 @@ if __name__ == '__main__':
         covariates_df = pd.read_csv(args.covariates)
         n_covariates = covariates_df.shape[1] - 1
         info_df = pd.merge(info_df, covariates_df, how='left', left_on='sample_id', right_on='sample_id')
-        covariates = torch.from_numpy(info_df.iloc[:, n_covariates:].values)
+        covariates = torch.from_numpy(info_df.iloc[:, -n_covariates:].values).float()
+        print(f"Including covariates: {info_df.columns[-n_covariates:]}")
     
 
     sample_ids = info_df['sample_id'].values

@@ -132,6 +132,7 @@ class PRSNet(torch.nn.Module):
         self.n_layers = n_layers
         self.d_input = d_input
         self.d_hidden = d_hidden
+        self.n_covariates = n_covariates
 
         ## Gene Encoder
         self.gene_encoder = MLP(d_input=d_input, d_hidden=d_hidden, d_output=d_hidden, n_layers=n_gene_encode_layer, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=True)
@@ -179,6 +180,7 @@ class PRSNet(torch.nn.Module):
         else:
             g_h, weights = self.readout(g, hidden_rep[-1])
         ## Prediction
-        g_h = torch.cat([g_h, covariates], dim=1)
+        if self.n_covariates > 0:
+            g_h = torch.cat([g_h, covariates], dim=1)
         preds = self.predictor(g_h)
         return preds, weights

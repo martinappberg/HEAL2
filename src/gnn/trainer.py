@@ -57,7 +57,7 @@ class Trainer:
             if self.multiple_ancestries:
                 labels, preds, ph_attn_scores, anc_attn_scores = self.forward_batch_ma(model, ggi_graph, batch)
             else:
-                labels, preds, attn_scores, sample_ids, covariates = self.forward_batch(model, ggi_graph, batch)
+                labels, preds, attn_scores, sample_ids = self.forward_batch(model, ggi_graph, batch)
                 ## TRAIN
                 attn_scores = attn_scores.detach().cpu().numpy()
                 for i, sample in enumerate(sample_ids):
