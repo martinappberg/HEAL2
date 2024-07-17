@@ -92,9 +92,11 @@ def collate_fn(batch):
     feats = [sample['feat'] for sample in batch]
     labels = [sample['label'] for sample in batch]
     sample_ids = [sample['sample_id'] for sample in batch]
+    covariates = [sample['covariate'] for sample in batch]
     feats = torch.from_numpy(np.stack(feats)).to(torch.float32)
     labels = torch.FloatTensor(labels).to(torch.float32).reshape(-1,1)
-    return feats, labels, sample_ids
+    covariates = torch.from_numpy(np.stack(covariates)).to(torch.float32)
+    return feats, labels, sample_ids, covariates
 
 def ancestry_encoding(ancestries):
     encoded_ancestries = []

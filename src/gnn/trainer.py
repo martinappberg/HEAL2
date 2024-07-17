@@ -11,10 +11,10 @@ class Trainer:
         self.log_interval = log_interval
         self.multiple_ancestries = multiple_ancestries
     def forward_batch(self, model, ggi_graph, batch):
-        feats, labels, sample_ids = batch
+        feats, labels, sample_ids, covariates = batch
         batched_graph = dgl.batch([ggi_graph]*len(labels)).to(self.device)
-        feats, labels = feats.to(self.device), labels.to(self.device)
-        outputs, attn_scores = model(batched_graph, feats)
+        feats, labels, covariates = feats.to(self.device), labels.to(self.device), covariates.to(self.device)
+        outputs, attn_scores = model(batched_graph, feats, covariates)
         attn_scores = attn_scores.view(len(labels), ggi_graph.number_of_nodes())
         return labels, outputs, attn_scores, sample_ids
     def forward_batch_ma(self, model, ggi_graph, batch):
@@ -36,10 +36,11 @@ class Trainer:
 
         data_iter = iter(train_loader)
         next_batch = next(data_iter)
-        feats, labels, sample_ids = next_batch
+        feats, labels, sample_ids, covariates = next_batch
         feats = feats.cuda(non_blocking=True)
         labels = labels.cuda(non_blocking=True)
-        next_batch = (feats, labels, sample_ids)
+        covariates = covariates.cuda(non_blocking=True)
+        next_batch = (feats, labels, sample_ids, covariates)
         print("----------------Training----------------", flush=True)
         for cur_step in range(len(train_loader)):
             ## Forward pass
@@ -48,10 +49,11 @@ class Trainer:
             batch = next_batch 
             if cur_step + 1 != len(train_loader): 
                 next_batch = next(data_iter)
-                feats, labels, sample_ids = next_batch
+                feats, labels, sample_ids, covariates = next_batch
                 feats = feats.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)
-                next_batch = (feats, labels, sample_ids)
+                covariates = covariates.cuda(non_blocking=True)
+                next_batch = (feats, labels, sample_ids, covariates)
             if self.multiple_ancestries:
                 labels, preds, ph_attn_scores, anc_attn_scores = self.forward_batch_ma(model, ggi_graph, batch)
             else:
