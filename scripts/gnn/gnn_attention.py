@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 from src.gnn.dataset import Dataset
 from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
-from src.gnn.utils import skf_validation_split, create_dir_if_not_exists
+from src.gnn.utils import skf_validation_split, create_dir_if_not_exists, validation_split
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
 
@@ -45,7 +45,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    set_random_seed(22)
+    set_random_seed(args.random_state)
     ## Data loading and splits generating
     # Load the DataFrame
     info_df = pd.read_csv(f'{args.data_path}/{args.dataset}/info.csv')
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     ancestries = ancestry_encoding(info_df['ancestry'].values)
 
 
-    splits = skf_validation_split(labels, random_state=args.random_state, n_splits=5)
+    splits = validation_split(labels, random_state=args.random_state)
     
 
     ggi_graph = dgl.load_graphs(f'{args.data_path}/ggi_graph_{args.af}.bin')[0][0]
@@ -175,7 +175,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
             
-        best_val_scores, best_test_scores, _, best_val_attn_list, _, best_model, best_val_preds, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, _, best_model, best_val_preds, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
         print(f"----------------Final result----------------", flush=True)
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
@@ -206,7 +206,7 @@ if __name__ == '__main__':
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
 
-            full_attn_df = pd.DataFrame.from_dict(best_val_attn_list, orient='index', columns=gti_arr)
+            full_attn_df = pd.DataFrame.from_dict(best_train_attn_list, orient='index', columns=gti_arr)
             full_attn_df.loc[:, "split_id"] = split_id
             all_attns.append(full_attn_df)
 
