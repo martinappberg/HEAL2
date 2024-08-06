@@ -24,7 +24,7 @@ class Trainer:
         outputs, ph_attn_scores, anc_attn_scores = model(batched_graph, feats, ancestries)
         return labels, outputs, ph_attn_scores, anc_attn_scores
     def train_and_test(self, model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader=None, evaltrain_loader=None):
-        best_val_scores, best_test_scores = {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}
+        best_val_scores, best_test_scores, best_train_scores = {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}
         best_model_state = None
         running_loss = []
         cur_early_stop = 0
