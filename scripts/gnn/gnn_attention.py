@@ -197,7 +197,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
             
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, evaltrain_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, evaltrain_loader=evaltrain_loader)
         print(f"----------------Final result----------------", flush=True)
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
