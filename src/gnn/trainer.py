@@ -23,7 +23,7 @@ class Trainer:
         feats, ancestries, labels = feats.to(self.device), ancestries.to(self.device), labels.to(self.device)
         outputs, ph_attn_scores, anc_attn_scores = model(batched_graph, feats, ancestries)
         return labels, outputs, ph_attn_scores, anc_attn_scores
-    def train_and_test(self, model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader):
+    def train_and_test(self, model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader=None, evaltrain_loader=None):
         best_val_scores, best_test_scores = {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}
         best_model_state = None
         running_loss = []
@@ -59,9 +59,9 @@ class Trainer:
             else:
                 labels, preds, attn_scores, sample_ids = self.forward_batch(model, ggi_graph, batch)
                 ## TRAIN
-                attn_scores = attn_scores.detach().cpu().numpy()
-                for i, sample in enumerate(sample_ids):
-                    best_train_attn_list[sample] = attn_scores[i, :]
+                # attn_scores = attn_scores.detach().cpu().numpy()
+                # for i, sample in enumerate(sample_ids):
+                #     best_train_attn_list[sample] = attn_scores[i, :]
 
             loss = loss_fn(preds, labels)
 
@@ -87,6 +87,8 @@ class Trainer:
                     best_val_attn_list = val_attn_list
                     if test_loader is not None:
                         best_test_scores, best_test_attn_list, test_predictions = self.evaluate(model, ggi_graph, test_loader, metric_funcs)
+                    if evaltrain_loader is not None:
+                        best_train_scores, best_train_attn_list, train_predictions = self.evaluate(model, ggi_graph, evaltrain_loader, metric_funcs)
                     cur_early_stop = 0
                 else:
                     cur_early_stop += 1
@@ -95,7 +97,7 @@ class Trainer:
                 print(f"[{cur_step+1}] cur_val_score: {val_scores}, best_val_score: {best_val_scores}, test_score: {best_test_scores}", flush=True)
                 print("----------------Training----------------", flush=True)
             if cur_step == self.n_steps: break
-        return best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, best_model_state, best_val_predictions, test_predictions
+        return best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, best_model_state, best_val_predictions, test_predictions, best_train_scores, train_predictions
         
     def evaluate(self, model, ggi_graph, test_loader, metric_funcs):
         with torch.no_grad():

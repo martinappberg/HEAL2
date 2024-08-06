@@ -26,6 +26,8 @@ class Dataset(torch.utils.data.Dataset):  # type: ignore
         else:
             self.n_samples = len(self.labels)
         self.rescaler = rescaler
+
+        print(f"Dataset initialized with {self.n_samples} samples")
     def __len__(self):
         return self.n_samples
 

@@ -183,10 +183,17 @@ def stratified_k_fold_splits(labels, test_ratio=0.2, n_splits=3, random_state=42
 
     return splits
 
-def validation_split(labels, ratio=0.2, random_state=42, test_indices=None, test_group='tts'):
+def validation_split(labels, ratio=0.2, random_state=42, test_indices=[], test_group='tts', empty_test=False):
     indices = np.arange(len(labels))
-    
-    if test_indices is None:
+    train_indices = []
+    val_indices = []
+
+    if empty_test:
+        train_indices, val_indices = train_test_split(
+            indices, test_size=ratio, stratify=labels, random_state=random_state)
+        return [(train_indices, val_indices, test_indices, 'only_val', 'only_val', 'only_val')]
+
+    if len(test_indices) == 0:
         # If no test indices are provided, split into train+val and test
         train_val_indices, test_indices = train_test_split(
             indices, test_size=ratio, stratify=labels, random_state=random_state)

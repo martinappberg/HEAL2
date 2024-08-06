@@ -43,6 +43,7 @@ def parse_args():
     parser.add_argument('--pop_file', type=str, default=None, help='Population file')
     parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
     parser.add_argument('--covariates', type=str, default=None, help='File specifying the covariates')
+    parser.add_argument('--attn_scores', action="store_true")
     args = parser.parse_args()
     return args
 
@@ -201,6 +202,7 @@ if __name__ == '__main__':
 
         print(f"\n\nSplit {split_id} --> Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, rescaler=None, covariates=covariates[train_ids])
+        evaltrain_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=False, rescaler=None, covariates=covariates[train_ids])
         val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, rescaler=None, covariates=covariates[val_ids])
         test_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[test_ids],labels=labels[test_ids], balanced_sampling=False, rescaler=None, covariates=covariates[test_ids])
 
@@ -222,6 +224,7 @@ if __name__ == '__main__':
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         test_loader = DataLoader(test_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        evaltrain_loader = DataLoader(evaltrain_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
         model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
@@ -233,7 +236,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
         
-        best_val_scores, best_test_scores, _, _, _, _, val_predictions, test_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
@@ -244,12 +247,16 @@ if __name__ == '__main__':
             create_dir_if_not_exists(args.output)
             create_dir_if_not_exists(f"{args.output}/val_predictions")
             create_dir_if_not_exists(f"{args.output}/test_predictions")
+            create_dir_if_not_exists(f"{args.output}/train_predictions")
 
             # Store validation predictions
             store_predictions(val_predictions, f"{args.output}/val_predictions", f"{args.random_state}rs_split{split_id}_val_predictions.csv")
 
             # Store test predictions
             store_predictions(test_predictions, f"{args.output}/test_predictions", f"{args.random_state}rs_split{split_id}_test_predictions.csv")
+
+            # Store train predictions
+            store_predictions(train_predictions, f"{args.output}/train_predictions", f"{args.random_state}rs_split{split_id}_train_predictions.csv")
 
             # Combine additional split details
             results_data = {
@@ -268,9 +275,37 @@ if __name__ == '__main__':
             for metric_name, score in best_test_scores.items():
                 results_data[f"Test ({metric_name})"] = [score]
 
+            # Add best train scores to results data
+            for metric_name, score in best_train_scores.items():
+                results_data[f"Train ({metric_name})"] = [score]
+
             results_df = pd.DataFrame(results_data)
 
             # Append to CSV with header written only once
-            results_df.to_csv(filename, mode='a', header=False, index=False)
+            results_df.to_csv(filename, mode='a', header=not os.path.isfile(filename), index=False)
+
+            if args.attn_scores:
+                # Record attn_scores
+                create_dir_if_not_exists(f"{args.output}/attn_scores")
+
+                all_attns = []
+
+                train_attn_df = pd.DataFrame.from_dict(best_train_attn_list, orient='index', columns=gti_arr)
+                train_attn_df.loc[:, "type"] = "train"
+                train_attn_df.loc[:, "split_id"] = split_id
+                all_attns.append(train_attn_df)
+
+                val_attn_df = pd.DataFrame.from_dict(best_val_attn_list, orient='index', columns=gti_arr)
+                val_attn_df.loc[:, "type"] = "validation"
+                val_attn_df.loc[:, "split_id"] = split_id
+                all_attns.append(val_attn_df)
+
+                test_attn_df = pd.DataFrame.from_dict(best_test_attn_list, orient='index', columns=gti_arr)
+                test_attn_df.loc[:, "type"] = "test"
+                test_attn_df.loc[:, "split_id"] = split_id
+                all_attns.append(test_attn_df)
+
+                complete_attn = pd.concat(all_attns)
+                complete_attn.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}rs_split{split_id}.csv')
 
         

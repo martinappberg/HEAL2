@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument('--pop', type=str, default=None, help='Which population to filter for (eg. EUR, EAS, etc.)')
     parser.add_argument('--pop_file', type=str, default=None, help='Population file')
     parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
+    parser.add_argument('--covariates', type=str, default=None, help='File specifying the covariates')
     args = parser.parse_args()
     return args
 
@@ -122,6 +123,15 @@ if __name__ == '__main__':
 
     assert info_df['sample_id'].nunique() == len(info_df), "Duplicated sample IDs found."
     
+    ## Add covariates if we should
+    n_covariates = 0
+    covariates = torch.empty((info_df.shape[0], 0))
+    if args.covariates is not None:
+        covariates_df = pd.read_csv(args.covariates)
+        n_covariates = covariates_df.shape[1] - 1
+        info_df = pd.merge(info_df, covariates_df, how='left', left_on='sample_id', right_on='sample_id')
+        covariates = torch.from_numpy(info_df.iloc[:, -n_covariates:].values).float()
+        print(f"Including covariates: {info_df.columns[-n_covariates:]}")
 
     sample_ids = info_df['sample_id'].values
 
@@ -130,7 +140,7 @@ if __name__ == '__main__':
     ancestries = ancestry_encoding(info_df['ancestry'].values)
 
 
-    splits = validation_split(labels, random_state=args.random_state)
+    splits = validation_split(labels, random_state=args.random_state, empty_test=True)
     
 
     ggi_graph = dgl.load_graphs(f'{args.data_path}/ggi_graph_{args.af}.bin')[0][0]
@@ -139,13 +149,9 @@ if __name__ == '__main__':
 
     ## Device
     device = torch.device('cuda' if (torch.cuda.is_available()) else 'cpu')
-    trainer = Trainer(device=device, log_interval=20, n_early_stop=30)
+    trainer = Trainer(device=device, log_interval=20, n_early_stop=20)
 
     filename = f"{args.output}/prsnet_output_{args.cohort}cohort_{args.shuffle_controls}shufflecontrols_{args.bootstrap}bootstrap_{args.logo}logo_{args.af}af_exc{args.exclude}.csv"
-
-    case_control_counts = info_df.groupby(['group', 'label']).size().unstack(fill_value=0)
-    print("\nCase and Control counts per group:")
-    print(case_control_counts)
 
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
@@ -159,11 +165,27 @@ if __name__ == '__main__':
     for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
         print(f"\n\nBEGIN FULL TRAINING of split: {split_id}")
         assert len(set(train_ids) & set(val_ids)) == 0, "Overlap found between training and validation sets"
-        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True)
-        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False)
+        assert len(set(train_ids) & set(test_ids)) == 0, "Overlap found between training and test sets"
+        assert len(set(val_ids) & set(test_ids)) == 0, "Overlap found between validation and test sets"
+
+        train_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=True, covariates=covariates[train_ids])
+        val_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[val_ids],labels=labels[val_ids], balanced_sampling=False, covariates=covariates[val_ids])
+        evaltrain_set = Dataset(args.data_path, args.dataset, sample_ids=sample_ids[train_ids],labels=labels[train_ids], balanced_sampling=False, covariates=covariates[train_ids])
+
+        case_control_counts_train = info_df.iloc[train_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        case_control_counts_val = info_df.iloc[val_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        case_control_counts_test = info_df.iloc[test_ids, :].groupby(['group', 'label']).size().unstack(fill_value=0)
+        print("\nCase and Control counts per group:")
+        print("TRAIN:")
+        print(case_control_counts_train)
+        print("VAL:")
+        print(case_control_counts_val)
+        print("TEST:")
+        print(case_control_counts_test)
 
         train_loader = DataLoader(train_set, batch_size=int(train_size), shuffle=True, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
         val_loader = DataLoader(val_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
+        evaltrain_loader = DataLoader(evaltrain_set, batch_size=int(train_size), shuffle=False, num_workers=args.num_workers, worker_init_fn=seed_worker, drop_last=False, pin_memory=True, collate_fn=collate_fn)
 
         model = PRSNet(n_genes=num_nodes, n_layers=n_layers, d_input=features).to(device)
         loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
@@ -175,7 +197,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
             
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, _, best_model, best_val_preds, _ = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, None)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, evaltrain_loader)
         print(f"----------------Final result----------------", flush=True)
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
@@ -201,18 +223,35 @@ if __name__ == '__main__':
             for metric_name, score in best_test_scores.items():
                 results_data[f"Test ({metric_name})"] = [score]
 
+            # Add best train scores to results data
+            for metric_name, score in best_train_scores.items():
+                results_data[f"Train ({metric_name})"] = [score]
+
             results_df = pd.DataFrame(results_data)
 
             # Append to CSV with header written only once
             results_df.to_csv(filename, mode='a', header=False, index=False)
 
-            full_attn_df = pd.DataFrame.from_dict(best_train_attn_list, orient='index', columns=gti_arr)
+            full_attn_df = pd.DataFrame.from_dict(best_val_attn_list, orient='index', columns=gti_arr)
+            full_attn_df.loc[:, "type"] = "validation"
             full_attn_df.loc[:, "split_id"] = split_id
             all_attns.append(full_attn_df)
 
-            preds_df = pd.DataFrame.from_dict(best_val_preds, orient='index')
+            preds_df = pd.DataFrame.from_dict(val_predictions, orient='index')
+            preds_df.loc[:, "type"] = "validation"
+            preds_df.loc[:, "split_id"] = split_id
             all_preds.append(preds_df)
-        
+
+            full_attn_df_train = pd.DataFrame.from_dict(best_train_attn_list, orient='index', columns=gti_arr)
+            full_attn_df_train.loc[:, "type"] = "train"
+            full_attn_df_train.loc[:, "split_id"] = split_id
+            all_attns.append(full_attn_df_train)
+
+            preds_df_train = pd.DataFrame.from_dict(train_predictions, orient='index')
+            preds_df_train.loc[:, "type"] = "train"
+            preds_df_train.loc[:, "split_id"] = split_id
+            all_preds.append(preds_df_train)
+
     complete_attn = pd.concat(all_attns)
     complete_attn.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}.csv')
 
