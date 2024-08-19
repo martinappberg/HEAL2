@@ -61,6 +61,16 @@ if __name__ == '__main__':
     info_df = pd.read_csv(f'{args.data_path}/{args.dataset}/info.csv')
     non_pop_samples = None
 
+    ## Add covariates if we should
+    n_covariates = 0
+    covariates = torch.empty((info_df.shape[0], 0))
+    if args.covariates is not None:
+        covariates_df = pd.read_csv(args.covariates)
+        n_covariates = covariates_df.shape[1] - 1
+        info_df = pd.merge(info_df, covariates_df, how='left', left_on='sample_id', right_on='sample_id')
+        covariates = torch.from_numpy(info_df.iloc[:, -n_covariates:].values).float()
+        print(f"Including covariates: {info_df.columns[-n_covariates:]}")
+
     ## POP filter if we should
     if args.pop is not None:
         assert args.pop_file is not None, "Error: --pop_file must be specified if --pop is provided."
@@ -131,16 +141,6 @@ if __name__ == '__main__':
 
     assert info_df['sample_id'].nunique() == len(info_df), "Duplicated sample IDs found."
     
-    ## Add covariates if we should
-    n_covariates = 0
-    covariates = torch.empty((info_df.shape[0], 0))
-    if args.covariates is not None:
-        covariates_df = pd.read_csv(args.covariates)
-        n_covariates = covariates_df.shape[1] - 1
-        info_df = pd.merge(info_df, covariates_df, how='left', left_on='sample_id', right_on='sample_id')
-        covariates = torch.from_numpy(info_df.iloc[:, -n_covariates:].values).float()
-        print(f"Including covariates: {info_df.columns[-n_covariates:]}")
-    
 
     sample_ids = info_df['sample_id'].values
 
@@ -167,6 +167,7 @@ if __name__ == '__main__':
             if args.test_group == "NON_POP":
                 sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
                 labels = torch.concatenate([labels, torch.from_numpy(non_pop_samples['label'].values)])
+                info_df = pd.concat([info_df, non_pop_samples])
                 test_indices = non_pop_samples.index.values
             else:
                 test_indices = info_df[info_df['group'] == args.test_group].index.values
