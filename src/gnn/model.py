@@ -3,6 +3,8 @@ from torch import nn
 import torch.nn.functional as F
 from dgl.nn.pytorch.conv import GINConv
 from dgl.readout import sum_nodes
+import dgl
+from entmax import entmax_bisect
 
 def bert_init_params(module):
     if isinstance(module, nn.Linear):
@@ -93,7 +95,38 @@ class AttentiveReadout(nn.Module):
             g.ndata['v'] = self.value_layer(feats)
             h = sum_nodes(g, 'v', 'w')
             return h, g.ndata['w']
+
+class EnhancedMultiHeadAttentiveReadout(nn.Module):
+    def __init__(self, in_feats, num_heads=4, dropout_rate=0.5):
+        super(EnhancedMultiHeadAttentiveReadout, self).__init__()
+        self.in_feats = in_feats
+        self.key_layer = nn.Sequential(
+            nn.Linear(in_feats, in_feats),
+            nn.ReLU(),
+            nn.Linear(in_feats, in_feats)
+        )
+        self.attention_heads = nn.ModuleList([nn.Linear(in_feats, 1) for _ in range(num_heads)])
+        self.value_layer = nn.Linear(in_feats, in_feats)
+        self.norm = nn.LayerNorm(in_feats)
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.temperature = nn.Parameter(torch.tensor(0.1))
+        self.proj = nn.Linear(2 * in_feats, in_feats)
         
+    def forward(self, g, feats):
+        with g.local_scope():
+            keys = self.norm(self.key_layer(feats))
+            all_attention_scores = []
+            for head in self.attention_heads:
+                logits = head(keys) / self.temperature
+                attention_scores = nn.functional.sigmoid(logits)
+                all_attention_scores.append(attention_scores)
+           
+            g.ndata['w'] = torch.stack(all_attention_scores, dim=1).mean(dim=1)
+            g.ndata['v'] = self.value_layer(feats)
+            h = sum_nodes(g, 'v', 'w')
+            h = self.dropout(h)
+            return h, g.ndata['w']
+
 class MultiHeadAttentiveReadout(nn.Module):
     def __init__(self, in_feats, num_heads=4):
         super(MultiHeadAttentiveReadout, self).__init__()
@@ -152,8 +185,11 @@ class PRSNet(torch.nn.Module):
         if self.multiple_ancestries:
             self.readout = AttentiveReadoutMOE(d_hidden)
         else:
-            self.readout = AttentiveReadout(d_hidden)
+            #self.readout = AttentiveReadout(d_hidden)
+            #self.readout = AttentiveReadoutRefined(d_hidden)
             #self.readout = MultiHeadAttentiveReadout(d_hidden)
+            #self.readout = SoftmaxAttentionPerGraph(d_hidden)
+            self.readout = EnhancedMultiHeadAttentiveReadout(d_hidden)
         ## Predictor
         self.predictor = MLP(d_input=d_hidden + n_covariates, d_hidden=d_hidden, d_output=1, n_layers=n_predictor_layer, dropout=0, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=False)
         ## Parameter initialization
