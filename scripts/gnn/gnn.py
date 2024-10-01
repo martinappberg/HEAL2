@@ -191,7 +191,7 @@ if __name__ == '__main__':
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
     weight_decay = 1e-6
-    features = 78
+    features = 76
     n_layers = 1
 
     ## Validation
@@ -237,7 +237,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
         
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
@@ -308,5 +308,28 @@ if __name__ == '__main__':
 
                 complete_attn = pd.concat(all_attns)
                 complete_attn.to_csv(f'{args.output}/attn_scores/attn_scores_{args.random_state}rs_split{split_id}.csv')
+
+                # Record Z-sae scores
+                create_dir_if_not_exists(f"{args.output}/z_sae_scores")
+
+                all_z_sae = []
+
+                train_z_sae_df = pd.DataFrame.from_dict(train_z_sae_list, orient='index', columns=gti_arr)
+                train_z_sae_df.loc[:, "type"] = "train"
+                train_z_sae_df.loc[:, "split_id"] = split_id
+                all_z_sae.append(train_z_sae_df)
+
+                val_z_sae_df = pd.DataFrame.from_dict(val_z_sae_list, orient='index', columns=gti_arr)
+                val_z_sae_df.loc[:, "type"] = "validation"
+                val_z_sae_df.loc[:, "split_id"] = split_id
+                all_z_sae.append(val_z_sae_df)
+
+                test_z_sae_df = pd.DataFrame.from_dict(test_z_sae_list, orient='index', columns=gti_arr)
+                test_z_sae_df.loc[:, "type"] = "test"
+                test_z_sae_df.loc[:, "split_id"] = split_id
+                all_z_sae.append(test_z_sae_df)
+
+                complete_z_sae = pd.concat(all_z_sae)
+                complete_z_sae.to_csv(f'{args.output}/z_sae_scores/z_sae_{args.random_state}rs_split{split_id}.csv')
 
         

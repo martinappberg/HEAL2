@@ -14,9 +14,11 @@ class Trainer:
         feats, labels, sample_ids, covariates = batch
         batched_graph = dgl.batch([ggi_graph]*len(labels)).to(self.device)
         feats, labels, covariates = feats.to(self.device), labels.to(self.device), covariates.to(self.device)
-        outputs, attn_scores = model(batched_graph, feats, covariates)
-        attn_scores = attn_scores.view(len(labels), ggi_graph.number_of_nodes())
-        return labels, outputs, attn_scores, sample_ids
+        outputs, attn_scores, sae_loss, z_sae = model(batched_graph, feats, covariates)
+        attn_scores = attn_scores.view(batched_graph.batch_size, ggi_graph.number_of_nodes())
+        z_sae = z_sae.view(batched_graph.batch_size, ggi_graph.number_of_nodes(), 64)
+        z_sae = torch.sum(torch.abs(z_sae), dim=2)
+        return labels, outputs, attn_scores, sample_ids, sae_loss, z_sae
     def forward_batch_ma(self, model, ggi_graph, batch):
         feats, ancestries, labels = batch
         batched_graph = dgl.batch([ggi_graph]*len(labels)).to(self.device)
@@ -33,6 +35,11 @@ class Trainer:
         best_test_attn_list = {}
         best_val_predictions = {}
         test_predictions = {}
+
+        # Z_sae
+        train_z_sae_list = {}
+        val_z_sae_list = {}
+        test_z_sae_list = {}
 
         data_iter = iter(train_loader)
         next_batch = next(data_iter)
@@ -55,18 +62,19 @@ class Trainer:
                 covariates = covariates.cuda(non_blocking=True)
                 next_batch = (feats, labels, sample_ids, covariates)
             if self.multiple_ancestries:
-                labels, preds, ph_attn_scores, anc_attn_scores = self.forward_batch_ma(model, ggi_graph, batch)
+                labels, preds, ph_attn_scores, anc_attn_scores, sae_loss = self.forward_batch_ma(model, ggi_graph, batch)
             else:
-                labels, preds, attn_scores, sample_ids = self.forward_batch(model, ggi_graph, batch)
+                labels, preds, attn_scores, sample_ids, sae_loss, _ = self.forward_batch(model, ggi_graph, batch)
                 ## TRAIN
                 # attn_scores = attn_scores.detach().cpu().numpy()
                 # for i, sample in enumerate(sample_ids):
                 #     best_train_attn_list[sample] = attn_scores[i, :]
 
             loss = loss_fn(preds, labels)
+            total_loss = loss + sae_loss
 
             # Backward pass and optimization
-            loss.backward()
+            total_loss.backward()
             optimizer.step()
 
             running_loss.append(loss.detach().cpu().numpy())
@@ -76,7 +84,7 @@ class Trainer:
             if (cur_step+1) % self.eval_interval == 0:
                 running_loss = []
                 print("----------------Validating----------------", flush=True)
-                val_scores, val_attn_list, val_predictions = self.evaluate(model, ggi_graph, val_loader, metric_funcs)
+                val_scores, val_attn_list, val_predictions, val_z_sae_list = self.evaluate(model, ggi_graph, val_loader, metric_funcs)
                 if val_scores['auroc'] > best_val_scores['auroc']:
                     best_val_scores = val_scores
                     best_val_predictions = val_predictions
@@ -86,9 +94,9 @@ class Trainer:
                     ## VAL
                     best_val_attn_list = val_attn_list
                     if test_loader is not None:
-                        best_test_scores, best_test_attn_list, test_predictions = self.evaluate(model, ggi_graph, test_loader, metric_funcs)
+                        best_test_scores, best_test_attn_list, test_predictions, test_z_sae_list = self.evaluate(model, ggi_graph, test_loader, metric_funcs)
                     if evaltrain_loader is not None:
-                        best_train_scores, best_train_attn_list, train_predictions = self.evaluate(model, ggi_graph, evaltrain_loader, metric_funcs)
+                        best_train_scores, best_train_attn_list, train_predictions, train_z_sae_list = self.evaluate(model, ggi_graph, evaltrain_loader, metric_funcs)
                     cur_early_stop = 0
                 else:
                     cur_early_stop += 1
@@ -97,28 +105,31 @@ class Trainer:
                 print(f"[{cur_step+1}] cur_val_score: {val_scores}, best_val_score: {best_val_scores}, test_score: {best_test_scores}", flush=True)
                 print("----------------Training----------------", flush=True)
             if cur_step == self.n_steps: break
-        return best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, best_model_state, best_val_predictions, test_predictions, best_train_scores, train_predictions
+        return best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, best_model_state, best_val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list
         
     def evaluate(self, model, ggi_graph, test_loader, metric_funcs):
         with torch.no_grad():
             model.eval()
             preds_list, labels_list, ancestrys_list = [], [], []
             attn_list = {}
+            z_sae_list = {}
             sample_id_dict = {}
             for batch in test_loader:
                 if self.multiple_ancestries:
-                    labels, preds, ph_attn_scores, anc_attn_scores = self.forward_batch_ma(model, ggi_graph, batch)
+                    labels, preds, ph_attn_scores, anc_attn_scores, _, z_sae = self.forward_batch_ma(model, ggi_graph, batch)
                 else:
-                    labels, preds, attn_scores, sample_ids = self.forward_batch(model, ggi_graph, batch)
+                    labels, preds, attn_scores, sample_ids, _, z_sae = self.forward_batch(model, ggi_graph, batch)
                 preds_list.append(preds.detach())
                 labels_list.append(labels.detach())
                 attn_scores = attn_scores.detach().cpu().numpy()
+                z_sae = z_sae.detach().cpu().numpy()
                 
                 # Calculate sigmoid of predictions
                 sigmoid_preds = torch.sigmoid(preds)
                 
                 for i, sample in enumerate(sample_ids):
                     attn_list[sample] = attn_scores[i, :]
+                    z_sae_list[sample] = z_sae[i, :]
                     sample_id_dict[sample] = {
                         'pred': sigmoid_preds[i].detach().cpu().numpy().item(),
                         'label': labels[i].detach().cpu().numpy().item()
@@ -129,4 +140,4 @@ class Trainer:
 
             metric_results = {name: func(preds, labels.int()).item() for name, func in metric_funcs.items()}
 
-            return metric_results, attn_list, sample_id_dict
+            return metric_results, attn_list, sample_id_dict, z_sae_list

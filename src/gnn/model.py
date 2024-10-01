@@ -157,6 +157,46 @@ class MultiHeadAttentiveReadout(nn.Module):
             h = sum_nodes(g, 'v_avg', 'w_avg')  # Sum using the averaged weights
             return h, avg_weights
 
+class AttentiveReadoutWithSAE(nn.Module):
+    def __init__(self, in_feats, sae_hidden_dim, sae_activation=nn.ReLU(), sparsity_coef=1e-3):
+        super(AttentiveReadoutWithSAE, self).__init__()
+        self.in_feats = in_feats
+        # Original attention layers
+        self.key_layer = nn.Linear(in_feats, in_feats)
+        self.query_layer = nn.Sequential(
+            nn.Linear(in_feats, 1, bias=False),
+            nn.Sigmoid()
+        )
+        self.value_layer = nn.Linear(in_feats, in_feats)
+        # Sparse Autoencoder layers
+        self.encoder = nn.Linear(in_feats, sae_hidden_dim)
+        self.decoder = nn.Linear(sae_hidden_dim, in_feats)
+        self.sae_activation = sae_activation
+        self.sparsity_coef = sparsity_coef
+
+    def forward(self, g, feats):
+        with g.local_scope():
+            keys = self.key_layer(feats)
+            g.ndata['w'] = self.query_layer(keys)
+            g.ndata['v'] = self.value_layer(feats)
+
+            # Compute attention-weighted node features like before
+            g.ndata['z'] = g.ndata['v'] * g.ndata['w']
+
+            # Apply Sparse Autoencoder to attention-weighted features
+            z = g.ndata['z']
+            encoded = self.sae_activation(self.encoder(z))
+            decoded = self.decoder(encoded)
+            sae_loss = F.mse_loss(decoded, z)
+            sparsity_loss = torch.mean(torch.abs(encoded))
+            total_sae_loss = sae_loss + self.sparsity_coef * sparsity_loss
+
+            # Use the encoded features for readout
+            g.ndata['z_sae'] = encoded
+            h = dgl.sum_nodes(g, 'z_sae')  # Sum over nodes
+
+            return h, g.ndata['w'], total_sae_loss, g.ndata['z_sae']
+
 class PRSNet(torch.nn.Module):
     def __init__(self, multiple_ancestries=False, d_input=11, d_hidden=64, n_gene_encode_layer=1, n_layers=1, n_genes=19836, n_predictor_layer=2, mlp_hidden_ratio=1, n_covariates=0):
         super().__init__()
@@ -189,7 +229,12 @@ class PRSNet(torch.nn.Module):
             #self.readout = AttentiveReadoutRefined(d_hidden)
             #self.readout = MultiHeadAttentiveReadout(d_hidden)
             #self.readout = SoftmaxAttentionPerGraph(d_hidden)
-            self.readout = EnhancedMultiHeadAttentiveReadout(d_hidden)
+            #self.readout = EnhancedMultiHeadAttentiveReadout(d_hidden)
+            self.readout = AttentiveReadoutWithSAE(
+                in_feats=d_hidden,
+                sae_hidden_dim=d_hidden,  # You can adjust this
+                sparsity_coef=1  # Adjust sparsity coefficient as needed
+            )
         ## Predictor
         self.predictor = MLP(d_input=d_hidden + n_covariates, d_hidden=d_hidden, d_output=1, n_layers=n_predictor_layer, dropout=0, activation=self.activation, bias=True, use_batchnorm=True, out_batchnorm=False)
         ## Parameter initialization
@@ -212,11 +257,11 @@ class PRSNet(torch.nn.Module):
             hidden_rep.append(h)
         ## Readout
         if self.multiple_ancestries:
-            g_h, weights = self.readout(g, hidden_rep[-1], ancestries=ancestries)
+            g_h, weights, sae_loss, z_sae = self.readout(g, hidden_rep[-1], ancestries=ancestries)
         else:
-            g_h, weights = self.readout(g, hidden_rep[-1])
+            g_h, weights, sae_loss, z_sae = self.readout(g, hidden_rep[-1])
         ## Prediction
         if self.n_covariates > 0:
             g_h = torch.cat([g_h, covariates], dim=1)
         preds = self.predictor(g_h)
-        return preds, weights
+        return preds, weights, sae_loss, z_sae
