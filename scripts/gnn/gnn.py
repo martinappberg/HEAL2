@@ -159,7 +159,7 @@ if __name__ == '__main__':
                 test_indices = non_pop_samples.index.values
             else:
                 test_indices = info_df[info_df['group'] == args.test_group].index.values
-            splits = stratified_k_fold_splits(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
+            splits = stratified_k_fold_splits(labels, n_splits=5, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
         else:
             splits = stratified_k_fold_splits(labels, random_state=args.random_state)
     elif args.tts:
