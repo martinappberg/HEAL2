@@ -191,7 +191,7 @@ if __name__ == '__main__':
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
     weight_decay = 1e-6
-    features = 76
+    features = 78
     n_layers = 1
 
     ## Validation
@@ -237,7 +237,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
         
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list, train_feature_importance, val_feature_importance, test_feature_importance = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
@@ -331,5 +331,28 @@ if __name__ == '__main__':
 
                 complete_z_sae = pd.concat(all_z_sae)
                 complete_z_sae.to_csv(f'{args.output}/z_sae_scores/z_sae_{args.random_state}rs_split{split_id}.csv')
+
+                # Record Feature Importance
+                create_dir_if_not_exists(f"{args.output}/feature_importance")
+
+                all_feature_importance = []
+
+                train_feature_importance_df = pd.DataFrame.from_dict(train_feature_importance, orient='index')
+                train_feature_importance_df.loc[:, "type"] = "train"
+                train_feature_importance_df.loc[:, "split_id"] = split_id
+                all_feature_importance.append(train_feature_importance_df)
+
+                val_feature_importance_df = pd.DataFrame.from_dict(val_feature_importance, orient='index')
+                val_feature_importance_df.loc[:, "type"] = "validation"
+                val_feature_importance_df.loc[:, "split_id"] = split_id
+                all_feature_importance.append(val_feature_importance_df)
+
+                test_feature_importance_df = pd.DataFrame.from_dict(test_feature_importance, orient='index')
+                test_feature_importance_df.loc[:, "type"] = "test"
+                test_feature_importance_df.loc[:, "split_id"] = split_id
+                all_feature_importance.append(test_feature_importance_df)
+
+                complete_feature_importance = pd.concat(all_feature_importance)
+                complete_feature_importance.to_csv(f'{args.output}/feature_importance/feature_importance_{args.random_state}rs_split{split_id}.csv')
 
         

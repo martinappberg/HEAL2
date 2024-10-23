@@ -192,8 +192,8 @@ class AttentiveReadoutWithSAE(nn.Module):
             total_sae_loss = sae_loss + self.sparsity_coef * sparsity_loss
 
             # Use the encoded features for readout
-            g.ndata['z_sae'] = encoded
-            h = dgl.sum_nodes(g, 'z_sae')  # Sum over nodes
+            g.ndata['z_sae'] = decoded
+            h = dgl.sum_nodes(g, 'z_sae', weight='w')  # Sum over nodes
 
             return h, g.ndata['w'], total_sae_loss, g.ndata['z_sae']
 

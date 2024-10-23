@@ -156,12 +156,13 @@ if __name__ == '__main__':
     train_size = 16
     learning_rate = 1e-4 * (train_size / 256)
     weight_decay = 1e-6
-    features = 76
+    features = 78
     n_layers = 1
 
     all_attns = []
     all_preds = []
     all_z_sae = []
+    all_feature_importance = []
     ## Validation
     for split_id, (train_ids, val_ids, test_ids, train_groups, val_groups, test_groups) in enumerate(splits):
         print(f"\n\nBEGIN FULL TRAINING of split: {split_id}")
@@ -198,7 +199,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
             
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, evaltrain_loader=evaltrain_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list, train_feature_importance, val_feature_importance, test_feature_importance = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, evaltrain_loader=evaltrain_loader)
         print(f"----------------Final result----------------", flush=True)
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
 
@@ -209,6 +210,7 @@ if __name__ == '__main__':
             create_dir_if_not_exists(f"{args.output}/attn_scores")
             create_dir_if_not_exists(f"{args.output}/z_sae_scores")
             create_dir_if_not_exists(f"{args.output}/preds")
+            create_dir_if_not_exists(f"{args.output}/feature_importance")
 
             results_data = {
                 "Split ID": [split_id],
@@ -244,6 +246,11 @@ if __name__ == '__main__':
             full_z_sae_df.loc[:, "split_id"] = split_id
             all_z_sae.append(full_z_sae_df)
 
+            full_feature_importance_df = pd.DataFrame.from_dict(val_feature_importance, orient='index')
+            full_feature_importance_df.loc[:, "type"] = "validation"
+            full_feature_importance_df.loc[:, "split_id"] = split_id
+            all_feature_importance.append(full_feature_importance_df)
+
             preds_df = pd.DataFrame.from_dict(val_predictions, orient='index')
             preds_df.loc[:, "type"] = "validation"
             preds_df.loc[:, "split_id"] = split_id
@@ -259,6 +266,11 @@ if __name__ == '__main__':
             full_z_sae_df_train.loc[:, "split_id"] = split_id
             all_z_sae.append(full_z_sae_df_train)
 
+            full_feature_importance_df_train = pd.DataFrame.from_dict(train_feature_importance, orient='index')
+            full_feature_importance_df_train.loc[:, "type"] = "train"
+            full_feature_importance_df_train.loc[:, "split_id"] = split_id
+            all_feature_importance.append(full_feature_importance_df_train)
+
             preds_df_train = pd.DataFrame.from_dict(train_predictions, orient='index')
             preds_df_train.loc[:, "type"] = "train"
             preds_df_train.loc[:, "split_id"] = split_id
@@ -269,6 +281,9 @@ if __name__ == '__main__':
 
     complete_z_sae = pd.concat(all_z_sae)
     complete_z_sae.to_csv(f'{args.output}/z_sae_scores/z_sae_{args.random_state}.csv')
+
+    complete_feature_importance = pd.concat(all_feature_importance)
+    complete_feature_importance.to_csv(f'{args.output}/feature_importance/feature_importance_{args.random_state}.csv')
 
     complete_preds = pd.concat(all_preds)
     complete_preds.to_csv(f'{args.output}/preds/preds_{args.random_state}.csv')
