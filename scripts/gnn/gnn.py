@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument('--pop_threshold', type=float, help='Population threshold', default=0.85)
     parser.add_argument('--covariates', type=str, default=None, help='File specifying the covariates')
     parser.add_argument('--attn_scores', action="store_true")
+    parser.add_argument('--feature_importance', action="store_true")
     args = parser.parse_args()
     return args
 
@@ -76,12 +77,20 @@ if __name__ == '__main__':
         assert args.pop_file is not None, "Error: --pop_file must be specified if --pop is provided."
         print(f"Will begin pop-filter of {info_df.shape[0]} samples for {args.pop} ≥ {args.pop_threshold}")
         pop = pd.read_csv(args.pop_file)
-        pop = pop[pop[args.pop].astype(float) >= args.pop_threshold].copy()
         pop.loc[:, 'IID'] = pop['FID'].astype(str).str.cat(pop['SID'].astype(str), sep='_')
         pop = pop.set_index('IID', drop=True)
-        non_pop_samples = info_df[~info_df['sample_id'].isin(pop.index)]
-        info_df = info_df[info_df['sample_id'].isin(pop.index)].reset_index(drop=True)
-        print(f"Population filtered -> {info_df.shape[0]} samples remain, {non_pop_samples.shape[0]} filtered out")
+        pop_filter = pop[pop[args.pop].astype(float) >= args.pop_threshold].copy()
+
+        n_original_samples = info_df.shape[0]
+        non_pop_indices = pop.index.difference(pop_filter.index).intersection(info_df['sample_id'])
+        pop_indices = pop_filter.index.intersection(info_df['sample_id'])
+        non_pop_samples = info_df[info_df['sample_id'].isin(non_pop_indices)]
+        info_df = info_df[info_df['sample_id'].isin(pop_indices)]
+        # Double check
+        non_pop_double_check = pd.merge(non_pop_samples.set_index('sample_id'), pop, left_index=True, right_index=True)
+        assert non_pop_double_check[args.pop].max() < args.pop_threshold, f"Non pop samples were not correctly filtered {non_pop_double_check[args.pop].max()} > {args.pop_threshold}"
+        print(f"Population filtered {n_original_samples} -> {info_df.shape[0]} samples remain, {non_pop_samples.shape[0]} filtered out")
+
 
     # Read gene to index
     json_data = open(f'{args.data_path}/gene_to_index_{args.af}.json', 'r')
@@ -90,6 +99,7 @@ if __name__ == '__main__':
 
     # Set the 'group' column based on the first character of 'sample_id'
     info_df['group'] = info_df['sample_id'].str[0]
+    non_pop_samples['group'] = non_pop_samples['sample_id'].str[0]
 
     # Reassign 'I' cases to 'E'
     info_df.loc[(info_df['group'] == 'I') & (info_df['label'] == 1), 'group'] = 'E'
@@ -156,7 +166,8 @@ if __name__ == '__main__':
             if args.test_group == "NON_POP":
                 sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
                 labels = torch.concatenate([labels, torch.from_numpy(non_pop_samples['label'].values)])
-                test_indices = non_pop_samples.index.values
+                info_df = pd.concat([info_df, non_pop_samples]).reset_index(drop=True)
+                test_indices = info_df.index.values[-non_pop_samples.shape[0]:]
             else:
                 test_indices = info_df[info_df['group'] == args.test_group].index.values
             splits = stratified_k_fold_splits(labels, n_splits=5, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
@@ -167,8 +178,8 @@ if __name__ == '__main__':
             if args.test_group == "NON_POP":
                 sample_ids = np.concatenate([sample_ids, non_pop_samples['sample_id'].values])
                 labels = torch.concatenate([labels, torch.from_numpy(non_pop_samples['label'].values)])
-                info_df = pd.concat([info_df, non_pop_samples])
-                test_indices = non_pop_samples.index.values
+                info_df = pd.concat([info_df, non_pop_samples]).reset_index(drop=True)
+                test_indices = info_df.index.values[-non_pop_samples.shape[0]:]
             else:
                 test_indices = info_df[info_df['group'] == args.test_group].index.values
             splits = validation_split(labels, random_state=args.random_state, test_indices=test_indices, test_group=args.test_group)
@@ -237,7 +248,7 @@ if __name__ == '__main__':
             'auprc': metric_auprc,
         }
         
-        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list, train_feature_importance, val_feature_importance, test_feature_importance = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader)
+        best_val_scores, best_test_scores, best_train_attn_list, best_val_attn_list, best_test_attn_list, _, val_predictions, test_predictions, best_train_scores, train_predictions, train_z_sae_list, val_z_sae_list, test_z_sae_list, train_feature_importance, val_feature_importance, test_feature_importance = trainer.train_and_test(model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader, evaltrain_loader, args.feature_importance)
         print(f"----------------Split {split_id} final result----------------", flush=True)
         print(f"Training groups: {train_groups} | Validation groups: {val_groups} | Test groups: {test_groups}")
         print(f"best_val_score: {best_val_scores}, best_test_score: {best_test_scores}")
@@ -335,6 +346,7 @@ if __name__ == '__main__':
                 # Record Feature Importance
                 create_dir_if_not_exists(f"{args.output}/feature_importance")
 
+            if args.feature_importance:
                 all_feature_importance = []
 
                 train_feature_importance_df = pd.DataFrame.from_dict(train_feature_importance, orient='index')
