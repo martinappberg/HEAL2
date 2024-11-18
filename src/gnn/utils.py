@@ -79,15 +79,6 @@ def generate_splits(labels, train_ratio=0.8, val_ratio=0.1, n_splits=3):
     
     return splits
 
-def collate_fn_ma(batch):
-    feats = [sample['feat'] for sample in batch]
-    ancestrys = [sample['ancestry'] for sample in batch]
-    labels = [sample['label'] for sample in batch]
-    feats = torch.from_numpy(np.stack(feats)).to(torch.float32)
-    ancestrys = torch.LongTensor(ancestrys)
-    labels = torch.FloatTensor(labels).to(torch.float32).reshape(-1,1)
-    return feats, ancestrys, labels
-
 def collate_fn(batch):
     feats = [sample['feat'] for sample in batch]
     labels = [sample['label'] for sample in batch]
@@ -97,19 +88,6 @@ def collate_fn(batch):
     labels = torch.FloatTensor(labels).to(torch.float32).reshape(-1,1)
     covariates = torch.from_numpy(np.stack(covariates)).to(torch.float32)
     return feats, labels, sample_ids, covariates
-
-def ancestry_encoding(ancestries):
-    encoded_ancestries = []
-    for ancestry in ancestries:
-        if ancestry == 'EUR':
-            encoded_ancestries.append(0)
-        if ancestry == 'SAS':
-            encoded_ancestries.append(1)
-        if ancestry == 'AFR':
-            encoded_ancestries.append(2)
-        else:
-            encoded_ancestries.append(3)
-    return encoded_ancestries
 
 ## UTILS FOR VALIDATION
 def create_dir_if_not_exists(directory_path):

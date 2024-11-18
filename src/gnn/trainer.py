@@ -3,13 +3,12 @@ from torch import nn
 import dgl
 import numpy as np
 class Trainer:
-    def __init__(self, device, eval_interval=100, n_steps=20000, n_early_stop=50, log_interval=20, multiple_ancestries=False):
+    def __init__(self, device, eval_interval=100, n_steps=20000, n_early_stop=50, log_interval=20):
         self.device=device
         self.eval_interval = eval_interval
         self.n_steps = n_steps
         self.n_early_stop = n_early_stop
         self.log_interval = log_interval
-        self.multiple_ancestries = multiple_ancestries
     def forward_batch(self, model, ggi_graph, batch):
         feats, labels, sample_ids, covariates = batch
         batched_graph = dgl.batch([ggi_graph]*len(labels)).to(self.device)
@@ -19,12 +18,6 @@ class Trainer:
         z_sae = z_sae.view(batched_graph.batch_size, ggi_graph.number_of_nodes(), 64)
         z_sae = torch.sum(torch.abs(z_sae), dim=2)
         return labels, outputs, attn_scores, sample_ids, sae_loss, z_sae
-    def forward_batch_ma(self, model, ggi_graph, batch):
-        feats, ancestries, labels = batch
-        batched_graph = dgl.batch([ggi_graph]*len(labels)).to(self.device)
-        feats, ancestries, labels = feats.to(self.device), ancestries.to(self.device), labels.to(self.device)
-        outputs, ph_attn_scores, anc_attn_scores = model(batched_graph, feats, ancestries)
-        return labels, outputs, ph_attn_scores, anc_attn_scores
     def train_and_test(self, model, ggi_graph, loss_fn, optimizer, metric_funcs, train_loader, val_loader, test_loader=None, evaltrain_loader=None, calculate_feature_importance=False):
         best_val_scores, best_test_scores, best_train_scores = {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}, {name: 0 for name in metric_funcs}
         best_model_state = None
@@ -66,14 +59,8 @@ class Trainer:
                 labels = labels.cuda(non_blocking=True)
                 covariates = covariates.cuda(non_blocking=True)
                 next_batch = (feats, labels, sample_ids, covariates)
-            if self.multiple_ancestries:
-                labels, preds, ph_attn_scores, anc_attn_scores, sae_loss = self.forward_batch_ma(model, ggi_graph, batch)
-            else:
-                labels, preds, attn_scores, sample_ids, sae_loss, _ = self.forward_batch(model, ggi_graph, batch)
-                ## TRAIN
-                # attn_scores = attn_scores.detach().cpu().numpy()
-                # for i, sample in enumerate(sample_ids):
-                #     best_train_attn_list[sample] = attn_scores[i, :]
+            
+            labels, preds, attn_scores, sample_ids, sae_loss, _ = self.forward_batch(model, ggi_graph, batch)
 
             loss = loss_fn(preds, labels)
             total_loss = loss + sae_loss

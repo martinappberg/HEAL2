@@ -14,7 +14,7 @@ import json
 warnings.filterwarnings("ignore")
 
 from src.gnn.dataset import Dataset
-from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
+from src.gnn.utils import seed_worker, collate_fn, set_random_seed
 from src.gnn.utils import logo_splits, sk_splits, stratified_k_fold_splits, create_dir_if_not_exists, validation_split
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
@@ -85,7 +85,7 @@ if __name__ == '__main__':
         non_pop_indices = pop.index.difference(pop_filter.index).intersection(info_df['sample_id'])
         pop_indices = pop_filter.index.intersection(info_df['sample_id'])
         non_pop_samples = info_df[info_df['sample_id'].isin(non_pop_indices)]
-        info_df = info_df[info_df['sample_id'].isin(pop_indices)]
+        info_df = info_df[info_df['sample_id'].isin(pop_indices)].reset_index(drop=True)
         # Double check
         non_pop_double_check = pd.merge(non_pop_samples.set_index('sample_id'), pop, left_index=True, right_index=True)
         assert non_pop_double_check[args.pop].max() < args.pop_threshold, f"Non pop samples were not correctly filtered {non_pop_double_check[args.pop].max()} > {args.pop_threshold}"
@@ -156,7 +156,6 @@ if __name__ == '__main__':
 
     labels = torch.from_numpy(info_df['label'].values)
     groups = info_df['group'].values
-    ancestries = ancestry_encoding(info_df['ancestry'].values)
     #splits = generate_splits(labels)
 
     if args.logo:

@@ -14,7 +14,7 @@ import json
 warnings.filterwarnings("ignore")
 
 from src.gnn.dataset import Dataset
-from src.gnn.utils import seed_worker, collate_fn, ancestry_encoding, set_random_seed
+from src.gnn.utils import seed_worker, collate_fn, set_random_seed
 from src.gnn.utils import skf_validation_split, create_dir_if_not_exists, validation_split
 from src.gnn.model import PRSNet
 from src.gnn.trainer import Trainer
@@ -146,7 +146,6 @@ if __name__ == '__main__':
 
     labels = torch.from_numpy(info_df['label'].values)
     groups = info_df['group'].values
-    ancestries = ancestry_encoding(info_df['ancestry'].values)
 
 
     splits = validation_split(labels, random_state=args.random_state, empty_test=True)
