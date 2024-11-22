@@ -170,3 +170,6 @@ The pipeline generates several output files:
 - Use `--help` with any script for detailed parameter information
 - Population filtering is recommended before model training
 - GNN preprocessing requires additional gene-gene interaction data
+
+## Example workflow
+- Todo
