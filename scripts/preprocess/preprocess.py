@@ -56,7 +56,7 @@ def main():
 
     # Additional arguments
     parser.add_argument('--equal_allele_weights', action='store_true', help='Equal alelle weights for heterozygous and homozygous variants')
-    parser.add_argument('--gnn', action='store_true', help='Include all scores, both sum and max for GNN processing')
+    parser.add_argument('--multidimensional', action='store_true', help='Include all scores, both sum and max for GNN processing')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -82,7 +82,7 @@ def main():
     combined = combined.explode('Gene.refGene')
 
     if indels:
-        if not args.gnn:
+        if not args.multidimensional:
             # Add LoF scores
             combined.loc[:, 'REVEL_score'] = combined.apply(lambda x: lof_score(x['Gene.refGene']) if (x['REVEL_score'] == '.' and x['ExonicFunc.refGene'] in lofs) else x['REVEL_score'], axis=1)
         else:
@@ -94,7 +94,7 @@ def main():
     else:
         combined = combined[combined['ExonicFunc.refGene'] == 'nonsynonymous_SNV']
 
-    only_revel = combined if args.gnn else combined[combined['REVEL_score'] != '.']
+    only_revel = combined if args.multidimensional else combined[combined['REVEL_score'] != '.']
 
     print(f"Filtered out {start_variants - only_revel.shape[0]} variants that did not have REVEL or pLI score")
 
@@ -145,7 +145,7 @@ def main():
     geno_complete_numeric = geno_complete.apply(lambda x: pd.to_numeric(x, errors='coerce')).fillna(0)
     
     mutmatrix = None
-    if args.gnn:
+    if args.multidimensional:
         gnn_scores = ['SIFT_converted_rankscore', 'SIFT4G_converted_rankscore', 'Polyphen2_HDIV_rankscore',
                       'Polyphen2_HVAR_rankscore', 'LRT_converted_rankscore', 'MutationTaster_converted_rankscore',
                       'MutationAssessor_rankscore', 'FATHMM_converted_rankscore', 'PROVEAN_converted_rankscore',
@@ -212,8 +212,8 @@ def main():
         base_name += f'_filtercohortU{args.filter_cohort_U}'
     if args.equal_allele_weights:
         base_name += '_equalalleleweights'
-    if args.gnn:
-        base_name += '_gnn'
+    if args.multidimensional:
+        base_name += '_multidimensional'
     merged_filtered.to_csv(f'{output_dir}/{base_name}_REVEL_{gnomAD_AF}_gnomad_{indels}_indels.csv', sep='\t')
 
     print("Done")
