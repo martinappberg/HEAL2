@@ -14,12 +14,15 @@ HEAL2 (Hierarchial Estimate for Agnostic) is a deep learning-powered pipeline fo
 
 ### Required Dependencies
 ```bash
+python3
 pytorch
 dgl
 pandas
 numpy
-torchmetrics
+scikit-learn
 ```
+### Installation
+- TODO! Environmental file
 
 ### Input Data Requirements
 - ANNOVAR-annotated VCF files
