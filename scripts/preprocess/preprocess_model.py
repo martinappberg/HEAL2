@@ -10,7 +10,7 @@ import os
 import argparse
 
 def main():
-    parser = argparse.ArgumentParser(description='Additionally Preprocess data for GNN')
+    parser = argparse.ArgumentParser(description='Additionally Preprocess data for models')
     parser.add_argument('--af', type=float, default=0.05, help='Allele frequency threshold')
     parser.add_argument('-o', '--output', type=str, default=os.path.join(os.path.dirname(__file__), '../../gnn_data'), help='Output directory')
     parser.add_argument('--ggi', type=str, default=os.path.join(os.path.dirname(__file__), '../../files/ggi_no_score.csv'), help='Gene-gene interaction file')
