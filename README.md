@@ -9,6 +9,8 @@ HEAL2 (Hierarchial Estimate for Agnostic) is a deep learning-powered pipeline fo
 - [Data Preprocessing](#data-preprocessing)
 - [Model Training and Evaluation](#model-training-and-evaluation)
 - [Script Details](#script-details)
+- [Notes](#notes)
+- [Example Workflow](#example-workflow)
 
 ## Prerequisites
 
